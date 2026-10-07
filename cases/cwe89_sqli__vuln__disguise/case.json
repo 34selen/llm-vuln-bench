@@ -1,0 +1,6 @@
+{
+  "sample": "cwe89_sqli",
+  "label": "vuln",
+  "transform": "disguise",
+  "note": "generated 2026-10-08 outside the repo (scratchpad/gen/make_variants.py)"
+}

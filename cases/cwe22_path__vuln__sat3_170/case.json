@@ -1,0 +1,6 @@
+{
+  "sample": "cwe22_path",
+  "label": "vuln",
+  "transform": "sat3_170",
+  "note": "generated 2026-10-08 outside the repo (scratchpad/gen/make_variants.py)"
+}

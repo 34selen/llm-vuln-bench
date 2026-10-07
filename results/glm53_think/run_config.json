@@ -5,7 +5,7 @@
     "repeats": 3,
     "tools": [],
     "jobs": 2,
-    "timeout_sec": 300,
+    "timeout_sec": 900,
     "retries": 2,
     "seed": 20261007,
     "include_safe": true,
@@ -32,5 +32,5 @@
   "tools": [],
   "repeats": 3,
   "mock": false,
-  "started": "2026-10-07 23:54:00"
+  "started": "2026-10-08 00:50:04"
 }

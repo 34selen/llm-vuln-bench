@@ -1,0 +1,6 @@
+{
+  "sample": "cwe121_sbo",
+  "label": "vuln",
+  "transform": "sat3_325",
+  "note": "generated 2026-10-08 outside the repo (scratchpad/gen/make_variants.py)"
+}
