@@ -1,0 +1,6 @@
+{
+  "sample": "cwe22_path",
+  "label": "safe",
+  "transform": "smt",
+  "note": "generated 2026-10-07 by the former transforms.py (seed 20261007231)"
+}

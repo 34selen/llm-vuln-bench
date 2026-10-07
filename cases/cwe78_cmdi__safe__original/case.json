@@ -1,0 +1,6 @@
+{
+  "sample": "cwe78_cmdi",
+  "label": "safe",
+  "transform": "original",
+  "note": "generated 2026-10-07 by the former transforms.py (seed 20261007301)"
+}

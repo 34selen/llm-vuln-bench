@@ -1,0 +1,5 @@
+results/*/raw/
+results/*.log
+results/glm53_think/
+__pycache__/
+.env

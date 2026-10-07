@@ -1,0 +1,32 @@
+{
+  "cwe121_sbo": {
+    "cwe": "CWE-121",
+    "title": "Stack-based Buffer Overflow",
+    "language": "c",
+    "function": "set_display_name"
+  },
+  "cwe190_intov": {
+    "cwe": "CWE-190",
+    "title": "Integer Overflow or Wraparound",
+    "language": "c",
+    "function": "make_table"
+  },
+  "cwe22_path": {
+    "cwe": "CWE-22",
+    "title": "Path Traversal",
+    "language": "c",
+    "function": "print_note"
+  },
+  "cwe78_cmdi": {
+    "cwe": "CWE-78",
+    "title": "OS Command Injection",
+    "language": "c",
+    "function": "run_report"
+  },
+  "cwe89_sqli": {
+    "cwe": "CWE-89",
+    "title": "SQL Injection",
+    "language": "c",
+    "function": "lookup_user"
+  }
+}
