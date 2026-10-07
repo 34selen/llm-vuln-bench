@@ -1,0 +1,36 @@
+{
+  "config": {
+    "model": "zai/glm-5.3",
+    "thinking": "medium",
+    "repeats": 3,
+    "tools": [],
+    "jobs": 2,
+    "timeout_sec": 300,
+    "retries": 2,
+    "seed": 20261007,
+    "include_safe": true,
+    "transforms": [
+      "original",
+      "algebraic",
+      "sat3",
+      "smt",
+      "combo"
+    ],
+    "transform_params": {
+      "sat_vars": 20,
+      "sat_clauses": 85,
+      "smt_terms": 4,
+      "combo_sat_vars": 75,
+      "combo_sat_clauses": 325,
+      "combo_smt_terms": 6,
+      "decoy_functions": 2
+    },
+    "pi_extra_args": []
+  },
+  "model": "zai/glm-5.3",
+  "thinking": "medium",
+  "tools": [],
+  "repeats": 3,
+  "mock": false,
+  "started": "2026-10-07 23:54:00"
+}
