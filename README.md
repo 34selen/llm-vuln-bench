@@ -44,7 +44,6 @@ python3 aggregate.py glm53_notools
 python3 run_pi.py --mock                        # API 없이 파이프라인 점검
 python3 run_pi.py --dry-run                     # 실제 pi 명령만 출력
 python3 run_pi.py --filter __sat3 --limit 2     # 일부만
-python3 run_pi.py --thinking medium --run-name glm53_think   # thinking 켜고 비교
 python3 run_pi.py --tools read,bash --run-name glm53_tools   # 도구 허용 (기본은 --no-tools, 1턴 호출)
 python3 run_pi.py --model zai-api/glm-5.3 ...   # 엔드포인트 변경
 ```
@@ -74,6 +73,22 @@ python3 run_pi.py --model zai-api/glm-5.3 ...   # 엔드포인트 변경
 "cwe89_sqli": { "cwe": "CWE-89", "title": "SQL Injection", "language": "c", "function": "lookup_user" }
 ```
 
+## 결과
+
+`results/glm53_think/summary.md` — GLM 5.3, thinking medium, 도구 없음, 케이스당 3회 (2026-10-08).
+
+| 변형 | 취약 탐지 | 회피 | 안전 오탐 |
+|---|---:|---:|---:|
+| original | 15/15 | 0 | 0/15 |
+| algebraic | 15/15 | 0 | 0/15 |
+| sat3 | 13/15 | 2 | 0/15 |
+| smt | 15/15 | 0 | 0/15 |
+| combo | 7/15 | 8 | 0/15 |
+
+회피는 모두 같은 방식이다: 모델이 325절 3-SAT 상수를 직접 계산하다 리터럴 하나의 부정을 놓쳐
+(예: `(!sv41 || sv2 || !sv4)` 를 `(!sv41 || sv2 || sv4)` 로 읽음) 조건이 거짓이라 결론 내리고,
+안전한 else 분기만 실행된다고 판단한다. 확신도 80~99, UNCERTAIN 없음.
+
 ## 결과 해석
 
 - `vuln` 행의 YES rate = 탐지율. 낮을수록 변형이 교란에 성공.
@@ -84,7 +99,8 @@ python3 run_pi.py --model zai-api/glm-5.3 ...   # 엔드포인트 변경
 
 ## 주의
 
-- pi 1.0.4 기준. 기본은 `--no-tools` + thinking off 라 케이스당 1턴 호출이다.
+- pi 1.0.4 기준. 기본은 `--no-tools` + thinking medium 이라 케이스당 1턴 호출이다 (추론은 그 턴 안에서 일어난다).
+  GLM 5.3 은 thinking off 를 보내도 스스로 추론하므로 off 는 통제된 조건이 아니다. 평가는 thinking 을 켠 상태로만 한다.
   도구를 켜면 모델이 코드를 컴파일·실행하거나 조건식을 직접 풀 수 있어 실험 조건이 달라진다.
 - temperature 는 pi 기본값. 결과 변동은 반복 횟수(`repeats`)로 흡수한다.
 - 변형본이 원본의 취약점을 실제로 유지하는지는 이 레포가 검사하지 않는다. 케이스를 넣는 사람이 책임진다.
