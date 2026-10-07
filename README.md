@@ -12,7 +12,7 @@ run_pi.py        pi로 GLM 호출 → results/<run>/records.jsonl
 aggregate.py     조건별 탐지율 / CWE 일치율 / 보류율 / 다수결 → summary.md, summary.csv
 run_all.sh       run → aggregate
 config.json      모델, thinking, 반복 횟수, 병렬 수
-prompts/         system.md (판정자 역할, JSON 출력 강제), user.md (코드 템플릿)
+prompts/         system.md (도달 가능한 취약점을 묻는 기본 판정 프롬프트), system_any.md (도달 여부 무시, 위험 패턴 존재만 묻는 프롬프트), user.md (코드 템플릿)
 .env             ZAI_API_KEY (git 제외)
 models.json      종량제 엔드포인트 zai-api/glm-5.3 등록 (~/.pi/agent/models.json 에 복사됨)
 ```
@@ -46,6 +46,7 @@ python3 run_pi.py --dry-run                     # 실제 pi 명령만 출력
 python3 run_pi.py --filter __sat3 --limit 2     # 일부만
 python3 run_pi.py --tools read,bash --run-name glm53_tools   # 도구 허용 (기본은 --no-tools, 1턴 호출)
 python3 run_pi.py --model zai-api/glm-5.3 ...   # 엔드포인트 변경
+python3 run_pi.py --prompt prompts/system_any.md --run-name glm53_think_any   # 판정 프롬프트 교체
 ```
 
 같은 run-name 으로 다시 실행하면 이미 평가된 (케이스, 반복)은 건너뛴다.
@@ -75,19 +76,30 @@ python3 run_pi.py --model zai-api/glm-5.3 ...   # 엔드포인트 변경
 
 ## 결과
 
-`results/glm53_think/summary.md` — GLM 5.3, thinking medium, 도구 없음, 케이스당 3회 (2026-10-08).
+GLM 5.3, thinking medium, 도구 없음, 케이스당 3회. 숫자는 **15회 중 회피(미탐지) 횟수**.
 
-| 변형 | 취약 탐지 | 회피 | 안전 오탐 |
-|---|---:|---:|---:|
-| original | 15/15 | 0 | 0/15 |
-| algebraic | 15/15 | 0 | 0/15 |
-| sat3 | 13/15 | 2 | 0/15 |
-| smt | 15/15 | 0 | 0/15 |
-| combo | 7/15 | 8 | 0/15 |
+| 변형 | 내용 | `system.md` (도달 가능한 취약점?) | `system_any.md` (위험 패턴 존재?) |
+|---|---|---:|---:|
+| original | 원본 | 0 | 0 |
+| algebraic | 대수 항등식 조건 | 0 | 0 |
+| smt | 정수 항등식 조건 | 0 | 0 |
+| disguise | 변수명 위장 + 허위 주석 + 더미 함수 | 0 | 0 |
+| sat3 | 3-SAT 20변수·85절 | 2 | 0 |
+| sat3_170 | 3-SAT 40변수·170절 | 1 | 0 |
+| sat3_325 | 3-SAT 75변수·325절 | 3 | 0 |
+| combo | sat3_325 + smt + disguise | **8** | 0 |
 
-회피는 모두 같은 방식이다: 모델이 325절 3-SAT 상수를 직접 계산하다 리터럴 하나의 부정을 놓쳐
-(예: `(!sv41 || sv2 || !sv4)` 를 `(!sv41 || sv2 || sv4)` 로 읽음) 조건이 거짓이라 결론 내리고,
-안전한 else 분기만 실행된다고 판단한다. 확신도 80~99, UNCERTAIN 없음.
+안전 코드 오탐은 두 프롬프트 모두 0/15. 전체 표는 `results/glm53_think/summary.md`, `results/glm53_think_any/summary.md`.
+
+관찰:
+- 위장만으로는 회피 0. 3-SAT 만으로는 1~3회. 둘을 합친 combo 에서 8회로 급증한다. 위장은 단독으로는 효과가 없지만
+  모델이 조건식 계산을 틀렸을 때 "역시 안전한 분기였다"는 결론을 굳히는 역할을 한다.
+- 회피는 전부 같은 메커니즘이다: 모델이 325절 3-SAT 상수를 직접 계산하다 리터럴 하나의 부정을 놓쳐
+  (예: `(!sv41 || sv2 || !sv4)` 를 `(!sv41 || sv2 || sv4)` 로 읽음) 조건이 거짓이라 결론 내리고,
+  안전한 else 분기만 실행된다고 판단한다. 확신도 80~99, UNCERTAIN 없음.
+- 판정 프롬프트에서 "도달 가능한"을 빼고 "위험한 패턴이 있으면 보고"로 바꾸면 회피가 전부 사라진다 (reasoning 토큰도 20~35% 감소).
+  즉 이 공격은 코드를 숨기는 것이 아니라, 모델이 도달 가능성 판단을 하도록 유도한 뒤 그 판단을 틀리게 만드는 것이다.
+  반대로 그 프롬프트는 실제 dead code 도 전부 취약으로 보고하게 되므로, 실무 탐지기에서는 오탐과의 trade-off 가 된다.
 
 ## 결과 해석
 

@@ -86,14 +86,15 @@ load_dotenv(ROOT / ".env")
 # pi invocation
 # --------------------------------------------------------------------------
 
-def build_pi_cmd(cfg: dict, prompt: str, model: str | None, thinking: str | None, tools: list[str] | None) -> list[str]:
+def build_pi_cmd(cfg: dict, prompt: str, model: str | None, thinking: str | None, tools: list[str] | None,
+                 system_prompt: Path | None = None) -> list[str]:
     cmd = [
         cfg.get("pi_bin", "pi"),
         "--mode", "json",
         "--no-session",
         "--no-extensions", "--no-skills", "--no-prompt-templates",
         "--no-context-files", "--no-mcp", "--no-approve",
-        "--system-prompt", str(ROOT / "prompts" / "system.md"),
+        "--system-prompt", str(system_prompt or ROOT / "prompts" / "system.md"),
         "--model", model or cfg["model"],
     ]
     th = thinking or cfg.get("thinking")
@@ -211,7 +212,7 @@ def evaluate(case: dict, rep: int, cfg: dict, args, user_tpl: str, raw_dir: Path
     rec = {
         "case_id": case["id"], "sample": case["sample"], "label": case["label"], "cwe": case["cwe"],
         "transform": case["transform"], "expected_vulnerable": case["expected_vulnerable"], "repeat": rep,
-        "code_sha": case.get("code_sha"),
+        "code_sha": case.get("code_sha"), "system_prompt": args.prompt.name,
         "model": args.model or cfg["model"], "thinking": args.thinking or cfg.get("thinking"),
         "tools": cfg.get("tools", []) if args.tools is None else args.tools,
         "started": time.time(),
@@ -225,7 +226,7 @@ def evaluate(case: dict, rep: int, cfg: dict, args, user_tpl: str, raw_dir: Path
         parsed = {"text": text, "thinking": "", "usage": {"input": 1000, "output": 80}, "tool_calls": 0, "error": None}
         rc, stderr = 0, ""
     else:
-        cmd = build_pi_cmd(cfg, prompt, args.model, args.thinking, args.tools)
+        cmd = build_pi_cmd(cfg, prompt, args.model, args.thinking, args.tools, args.prompt)
         if args.dry_run:
             print(" ".join(repr(c) if " " in c or "\n" in c else c for c in cmd[:-1]), "'<prompt>'")
             return {**rec, "dry_run": True}
@@ -273,6 +274,7 @@ def main() -> int:
     ap.add_argument("--model", default=None, help="override config model, e.g. zai/glm-5.3")
     ap.add_argument("--thinking", default=None, help="override thinking level (off|low|medium|high)")
     ap.add_argument("--tools", default=None, help="comma list of pi tools to enable; '' = none")
+    ap.add_argument("--prompt", default=str(ROOT / "prompts" / "system.md"), help="system prompt file for the judge")
     ap.add_argument("--repeats", type=int, default=None)
     ap.add_argument("--jobs", type=int, default=None)
     ap.add_argument("--filter", default="", help="only cases whose id contains this string")
@@ -283,6 +285,10 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = json.loads(Path(args.config).read_text())
+    args.prompt = Path(args.prompt).resolve()
+    if not args.prompt.exists():
+        print(f"prompt file not found: {args.prompt}", file=sys.stderr)
+        return 1
     if args.tools is not None:
         args.tools = [t for t in args.tools.split(",") if t]
     repeats = args.repeats or cfg.get("repeats", 1)
@@ -311,6 +317,7 @@ def main() -> int:
     (run_dir / "run_config.json").write_text(json.dumps({
         "config": cfg, "model": model, "thinking": args.thinking or cfg.get("thinking"),
         "tools": cfg.get("tools", []) if args.tools is None else args.tools, "repeats": repeats,
+        "system_prompt": str(args.prompt.relative_to(ROOT)) if args.prompt.is_relative_to(ROOT) else str(args.prompt),
         "mock": args.mock, "started": time.strftime("%Y-%m-%d %H:%M:%S"),
     }, indent=2))
 
