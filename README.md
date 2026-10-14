@@ -9,12 +9,12 @@
 ```
 samples.json     샘플 이름 → CWE, 제목, 언어, 대상 함수
 cases/<sample>__<label>__<name>/code.*      평가할 코드 (사람이 넣음) + 선택적 case.json
-benchcore/       judge.py (pi 호출·응답 파싱)
+benchcore/       judge.py (pi 호출·도구 이벤트 파싱), submit_verdict.ts (판정 제출 도구), verdict.schema.json (입력 스키마)
 run_pi.py        pi로 GLM 호출 → results/<run>/records.jsonl
 aggregate.py     언어·조건별 탐지율 / CWE 일치율 / 보류율 / 오류 / 다수결 → summary.md, summary.csv
 run_all.sh       run → aggregate
 config.json      모델, thinking, 반복 횟수, 병렬 수
-prompts/         system.md (도달 가능한 취약점을 묻는 기본 판정 프롬프트), system_any.md (도달 여부 무시, 위험 패턴 존재만 묻는 프롬프트), user.md (코드 템플릿)
+prompts/         system.md (기본 판정의 UNCERTAIN 사용 기준), system_any.md (도달 여부 무시, 위험 패턴 존재만 묻는 프롬프트), user.md (코드 템플릿)
 .env             ZAI_API_KEY (git 제외)
 models.json      종량제 엔드포인트 zai-api/glm-5.3 등록 (~/.pi/agent/models.json 에 복사됨)
 ```
@@ -34,10 +34,10 @@ pi --list-models glm-5.3                          # zai/glm-5.3 이 보여야 �
 ## 실행
 
 ```bash
-./run_all.sh glm53_notools
+./run_all.sh glm53_tool_001
 # 단계별
-python3 run_pi.py --run-name glm53_notools
-python3 aggregate.py glm53_notools
+python3 run_pi.py --run-name glm53_tool_001
+python3 aggregate.py glm53_tool_001
 ```
 
 옵션:
@@ -46,7 +46,6 @@ python3 aggregate.py glm53_notools
 python3 run_pi.py --mock                        # API 없이 파이프라인 점검
 python3 run_pi.py --dry-run                     # 실제 pi 명령만 출력 (결과 폴더 생성 없음)
 python3 run_pi.py --filter __sat3 --limit 2     # 일부만
-python3 run_pi.py --tools read,bash --run-name glm53_tools   # 도구 허용 (기본은 --no-tools, 1턴 호출)
 python3 run_pi.py --model zai-api/glm-5.3 ...   # 엔드포인트 변경
 python3 run_pi.py --prompt prompts/system_any.md --run-name glm53_think_any   # 판정 프롬프트 교체
 ```
@@ -76,7 +75,31 @@ run-name 은 한 번만 사용할 수 있다. 같은 이름의 파일이나 폴�
 { "language": "python", "source": "src/main.py" }
 ```
 
-언어와 소스 경로는 판정 프롬프트와 결과 기록에 전달된다. 한 케이스는 소스 파일 하나를 평가한다.
+사용자 프롬프트에는 짧은 취약 여부 확인 요청과 소스 경로·코드를 전달한다.
+시스템 프롬프트에는 판정 기준과 UNCERTAIN 사용 기준을 두고, 제출 규칙은 도구와 각 인자의 설명에 둔다.
+언어는 결과 기록과 언어별 집계에 사용하며 프롬프트에 별도로 표기하지 않는다. 한 케이스는 소스 파일 하나를 평가한다.
+
+## 판정 제출
+
+모델은 `submit_verdict` 도구를 한 번 호출해 판정을 제출한다. 이 도구는 입력을 기록하고 해당 평가를 종료하며,
+파일 읽기나 코드 실행 기능은 없다. pi 는 발견된 확장을 비활성화하고 레포의 제출 도구만 명시적으로 로드한다.
+활성 도구는 `submit_verdict` 하나로 제한한다 (`--tools read,bash` 같은 다른 도구 설정은 거절한다).
+
+공통 입력 스키마는 `benchcore/verdict.schema.json` 에 있다. 모든 필드가 필수이며 알 수 없는 필드는 거절한다.
+
+| 필드 | 조건 |
+|---|---|
+| vulnerable | YES / NO / UNCERTAIN |
+| cwe | CWE-번호 또는 null |
+| function | 비어 있지 않은 함수 이름 또는 null |
+| line | 1 이상의 정수 또는 null |
+| confidence | 0~100 정수 |
+| reason | 비어 있지 않은 판단 근거 |
+
+Python 은 성공한 도구 실행의 호출 ID와 인자·결과를 대조하고 스키마를 다시 검증한다.
+텍스트 응답은 로그에만 보관한다. 도구 호출 누락, 잘못된 인자, 실패·미완료·중복 호출은 재시도하며,
+기본 `retries=2` 는 최초 호출 이후 최대 2회 추가 호출한다는 뜻이다. 모두 실패하면 판정값 없이 오류로 기록한다.
+`records.jsonl` 에는 `response_mode: "tool"`, 제출 인자(`tool_arguments`), `pred_parse: "tool"` 이 남는다.
 
 `cases/` 는 비어 있다. 평가할 케이스는 실험할 때마다 넣는다.
 아래 "결과" 절의 65개 케이스(변형 8종 × 샘플 5개)는 커밋 `d62241a` 의 `cases/` 에 있다
@@ -92,6 +115,9 @@ run-name 은 한 번만 사용할 수 있다. 같은 이름의 파일이나 폴�
 ```
 
 ## 결과
+
+아래는 제출 도구 도입 이전의 JSON 텍스트 응답 방식으로 수행한 C 실험이다.
+현재 도구 방식의 실험과는 응답 조건이 다르며, 새 실험은 별도의 run-name 으로 수행한다.
 
 GLM 5.3, thinking medium, 도구 없음, 케이스당 3회. 숫자는 **15회 중 회피(미탐지) 횟수**.
 
@@ -124,6 +150,7 @@ GLM 5.3, thinking medium, 도구 없음, 케이스당 3회. 숫자는 **15회 �
 - `safe` 행의 YES rate = 오탐율.
 - UNCERTAIN = 보고서의 "판단 보류". YES/NO 와 별도로 집계.
 - 호출 예외, timeout, 비정상 종료, 판정 파싱 실패는 `error` 와 `error_type` 으로 기록한다.
+  판정은 성공한 `submit_verdict` 호출의 인자에서 읽는다. 일반 텍스트나 JSON 텍스트만 반환하면 제출 누락으로 재시도한다.
   실패도 표본 수 `n`, `unparsed`, `errors` 에 포함되며 YES/NO/UNCERTAIN 으로 집계하지 않는다.
   YES rate 의 분모는 전체 평가 수이므로, 탐지율 하락을 교란 효과로 해석하기 전에 오류 수를 확인한다.
 - 집계는 언어별로 나눈다. 언어 정보가 없는 기존 C 실험 기록은 샘플의 언어를 사용한다.
@@ -137,11 +164,18 @@ python3 -m unittest discover -s tests -v
 ```
 
 테스트는 임시 디렉터리와 모의 응답을 사용하며 API 호출이나 기존 실험 기록 수정 없이 실행된다.
+pi 가 설치된 환경에서는 로컬 모의 서버로 실제 확장 로딩·스키마 검증·종료·재시도를 확인할 수 있다.
+이 통합 테스트는 외부 모델 API 를 호출하지 않는다.
+
+```bash
+nvm use 22
+BENCH_TEST_PI="$(command -v pi)" python3 -m unittest discover -s tests -v
+```
 
 ## 주의
 
-- pi 1.0.4 기준. 기본은 `--no-tools` + thinking medium 이라 케이스당 1턴 호출이다 (추론은 그 턴 안에서 일어난다).
+- pi 1.0.4 기준. 기본은 판정 제출 도구 하나 + thinking medium 이다. 정상 제출 후 추가 모델 호출 없이 종료한다.
   GLM 5.3 은 thinking off 를 보내도 스스로 추론하므로 off 는 통제된 조건이 아니다. 평가는 thinking 을 켠 상태로만 한다.
-  도구를 켜면 모델이 코드를 컴파일·실행하거나 조건식을 직접 풀 수 있어 실험 조건이 달라진다.
+  제출 도구는 모델의 판단을 기록하며, 코드의 실제 취약성이나 정답 라벨을 검증하지 않는다.
 - temperature 는 pi 기본값. 결과 변동은 반복 횟수(`repeats`)로 흡수한다.
 - 정답 라벨과 변형본의 취약점 보존 여부는 자동 검증하지 않는다. 케이스를 넣기 전에 사람이 검수해야 한다.

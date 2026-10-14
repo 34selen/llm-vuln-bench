@@ -2,7 +2,7 @@
   "model": "zai/glm-5.3",
   "thinking": "medium",
   "repeats": 3,
-  "tools": [],
+  "tools": ["submit_verdict"],
   "jobs": 2,
   "timeout_sec": 900,
   "retries": 2,

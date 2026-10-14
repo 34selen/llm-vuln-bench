@@ -136,7 +136,7 @@ def main() -> int:
         rc = json.loads(cfg_path.read_text())
         md.append(f"# Benchmark summary: `{out_dir.name}`\n")
         md.append(f"- model: `{rc.get('model')}`  thinking: `{rc.get('thinking')}`  tools: `{rc.get('tools')}`  repeats: {rc.get('repeats')}  "
-                  f"prompt: `{rc.get('system_prompt', 'prompts/system.md')}`  mock: {rc.get('mock')}")
+                  f"prompt: `{rc.get('system_prompt', 'prompts/system.md')}`  response mode: `{rc.get('response_mode', 'json')}`  mock: {rc.get('mock')}")
     md.append(f"- records: {len(recs)}  cases: {len(by_case)}\n")
 
     md.append("## Detection by transform\n")

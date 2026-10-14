@@ -5,17 +5,21 @@ LLM 취약점 탐지 교란 벤치마크. `cases/` 의 소스 코드를 pi 코�
 
 ## 구조
 
-- `benchcore/judge.py` — pi 명령 생성·실행, JSONL 응답과 판정 JSON 파싱. pi 는 빈 임시 디렉터리에서 실행한다
+- `benchcore/judge.py` — pi 명령 생성·실행, JSONL 도구 이벤트 파싱·인자 검증. pi 는 빈 임시 디렉터리에서 실행한다
   (케이스 폴더명·case.json 에 정답이 있으므로 도구를 켠 판정자가 읽지 못하게).
+- `benchcore/submit_verdict.ts` — pi 확장. 판정 제출 도구 하나를 제공하며 제출 후 평가를 종료한다.
+- `benchcore/verdict.schema.json` — 제출 도구와 Python 검증기가 공유하는 입력 스키마.
 - `run_pi.py` — 케이스 × 반복마다 `benchcore.judge` 로 1회 판정 → `results/<run>/records.jsonl` 에 append.
 - `aggregate.py` — `records.jsonl` → `summary.md`, `summary.csv`.
 - `run_all.sh` — run → aggregate.
 - `cases/<sample>__<label>__<transform>/code.*` (+ 선택 `case.json`) — 폴더명이 곧 메타데이터. `<label>` 은 `vuln` | `safe`.
   `source` 는 case.json 또는 samples.json 에 지정할 수 있으며, 없으면 폴더의 code.* 파일 한 개를 사용한다.
-  `language` 는 samples.json 에서 가져오고 case.json 에서 덮어쓸 수 있다. 언어와 소스 경로는 프롬프트·기록에 전달한다.
+  `language` 는 samples.json 에서 가져오고 case.json 에서 덮어쓸 수 있다. 언어는 기록·집계에만 사용한다.
+  사용자 프롬프트는 짧은 취약 여부 확인 요청과 소스 경로·코드를 전달한다.
+  판정 기준과 UNCERTAIN 사용 기준은 시스템 프롬프트에, 제출 규칙은 도구와 각 인자의 설명에 둔다.
   레포에는 비워 두고(`.gitkeep` 만) 케이스를 미리 커밋하지 않는다. `results/` 의 기존 run 에 쓰인 케이스는 커밋 `d62241a` 에 있다.
 - `samples.json` — sample → CWE, 제목, 언어, 대상 함수, 선택적 소스 경로.
-- `prompts/system.md` (도달 가능한 취약점?), `prompts/system_any.md` (위험 패턴 존재?), `prompts/user.md` (`{language}`, `{source}`, `{code}` 템플릿).
+- `prompts/system.md` (기본 판정의 UNCERTAIN 사용 기준), `prompts/system_any.md` (위험 패턴 존재?), `prompts/user.md` (`{source}`, `{code}` 템플릿).
 - `config.json` — model, thinking, repeats, tools, jobs, timeout_sec, retries, pi_extra_args (선택 pi_bin).
 
 ## 규칙
@@ -29,9 +33,11 @@ LLM 취약점 탐지 교란 벤치마크. `cases/` 의 소스 코드를 pi 코�
   집계는 기존 기록에서 요약 파일을 다시 생성할 수 있으며, 과거 중복 기록은 (case, repeat) 별 마지막 기록을 쓴다.
 - 실패 기록에도 케이스·언어·소스·실험 조건을 유지한다. 오류는 `error_type` 으로 분류하고 판정값을 비운다.
   집계에서 실패는 n/unparsed/errors 에 포함하며, 모델의 NO/UNCERTAIN 과 구분한다.
+- 판정은 성공한 submit_verdict 호출 하나에서만 읽는다. 텍스트 JSON 을 판정으로 파싱하지 않는다.
+  호출 누락·스키마 위반·실행 실패·중복 제출은 재시도한다. response_mode 와 제출 인자를 기록한다.
 - `results/*/raw/` 와 `.env` 는 git 제외. API 키(`ZAI_API_KEY`)를 커밋하거나 출력하지 말 것.
-- 실험 조건은 thinking=medium, 도구 없음(`--no-tools`)이 기본이다. GLM 5.3 은 thinking off 여도 추론하므로 off 는 통제 조건이 아니다.
-  도구를 켜면 모델이 조건식을 실행해 풀 수 있어 다른 실험이 된다.
+- 실험 조건은 thinking=medium, submit_verdict 도구 하나가 기본이다. read/bash 등의 다른 도구는 허용하지 않는다.
+  GLM 5.3 은 thinking off 여도 추론하므로 off 는 통제 조건이 아니다. 기존 results/ 는 JSON 텍스트 방식의 과거 실험이다.
 - 새 변형 이름을 추가하면 `aggregate.py` 의 `ORDER` 에도 넣어야 표 순서가 맞는다 (없으면 알파벳순으로 뒤에 붙음).
 - 결과를 README 에 반영할 때는 `results/<run>/summary.md` 의 숫자를 그대로 쓴다.
 
@@ -41,6 +47,7 @@ API 호출 없이 파이프라인 점검:
 
 ```bash
 python3 -m unittest discover -s tests -v
+BENCH_TEST_PI="$(command -v pi)" python3 -m unittest discover -s tests -v  # Node 22+; 로컬 모의 서버, 외부 모델 API 없음
 python3 run_pi.py --dry-run          # 케이스가 있을 때 실제 pi 명령만 출력; 결과 파일 생성 없음
 ```
 

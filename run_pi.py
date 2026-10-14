@@ -112,7 +112,7 @@ def evaluate(case: dict, rep: int, cfg: dict, args, raw_dir: Path) -> dict:
         "model": args.model or cfg["model"],
         "thinking": args.thinking or cfg.get("thinking"),
         "prompt": str(args.prompt),
-        "tools": cfg.get("tools", []) if args.tools is None else args.tools,
+        "tools": judge.effective_tools(cfg.get("tools") if args.tools is None else args.tools),
     }
     rec = {
         "case_id": case["id"], "sample": case["sample"], "label": case["label"], "cwe": case["cwe"],
@@ -120,6 +120,7 @@ def evaluate(case: dict, rep: int, cfg: dict, args, raw_dir: Path) -> dict:
         "language": case["language"], "source": case["source"],
         "code_sha": case.get("code_sha"), "system_prompt": args.prompt.name,
         "model": jd["model"], "thinking": jd["thinking"], "tools": jd["tools"],
+        "response_mode": "tool",
         "started": time.time(),
     }
     try:
@@ -127,9 +128,9 @@ def evaluate(case: dict, rep: int, cfg: dict, args, raw_dir: Path) -> dict:
         if args.mock:
             parsed = judge.mock_verdict(f"{case['id']}/{rep}", case["cwe"], case["function"])
             rc, stderr = 0, ""
-            verdict = judge.parse_verdict(parsed["text"])
+            verdict = parsed["verdict"]
         else:
-            out = judge.run(code, jd, language=case["language"], source=case["source"],
+            out = judge.run(code, jd, source=case["source"],
                             timeout=cfg.get("timeout_sec", 300), retries=cfg.get("retries", 2),
                             pi_bin=cfg.get("pi_bin", "pi"), extra_args=cfg.get("pi_extra_args"),
                             raw_path=raw_dir / f"{case['id']}__r{rep}.jsonl")
@@ -138,7 +139,7 @@ def evaluate(case: dict, rep: int, cfg: dict, args, raw_dir: Path) -> dict:
     except Exception as e:  # keep failed evaluations in the experiment's denominator
         parsed = {"text": "", "error": f"{type(e).__name__}: {e}", "error_type": "exception"}
         rc, stderr = None, ""
-        verdict = judge.parse_verdict("")
+        verdict = judge.empty_verdict()
     rec.update({
         "finished": time.time(),
         "elapsed_sec": round(time.time() - rec["started"], 2),
@@ -148,6 +149,7 @@ def evaluate(case: dict, rep: int, cfg: dict, args, raw_dir: Path) -> dict:
         "error_type": parsed.get("error_type"),
         "usage": parsed.get("usage"),
         "tool_calls": parsed.get("tool_calls"),
+        "tool_arguments": {k: verdict[k] for k in judge.VERDICT_SCHEMA["properties"]} if verdict["vulnerable"] else None,
         "response_text": parsed.get("text"),
         "thinking_chars": len(parsed.get("thinking", "")),
         **{f"pred_{k}": v for k, v in verdict.items()},
@@ -166,7 +168,7 @@ def main() -> int:
     ap.add_argument("--run-name", default=None, help="new name under results/; existing names are rejected")
     ap.add_argument("--model", default=None, help="override config model, e.g. zai/glm-5.3")
     ap.add_argument("--thinking", default=None, help="override thinking level (off|low|medium|high)")
-    ap.add_argument("--tools", default=None, help="comma list of pi tools to enable; '' = none")
+    ap.add_argument("--tools", default=None, help="only submit_verdict is allowed (the default)")
     ap.add_argument("--prompt", default=str(ROOT / "prompts" / "system.md"), help="system prompt file for the judge")
     ap.add_argument("--repeats", type=int, default=None)
     ap.add_argument("--jobs", type=int, default=None)
@@ -184,6 +186,10 @@ def main() -> int:
         return 1
     if args.tools is not None:
         args.tools = [t for t in args.tools.split(",") if t]
+    try:
+        args.tools = judge.effective_tools(cfg.get("tools") if args.tools is None else args.tools)
+    except ValueError as e:
+        ap.error(str(e))
     repeats = args.repeats if args.repeats is not None else cfg.get("repeats", 1)
     jobs = args.jobs if args.jobs is not None else cfg.get("jobs", 1)
     if repeats < 1 or jobs < 1 or args.limit < 0 or cfg.get("retries", 2) < 0:
@@ -217,7 +223,7 @@ def main() -> int:
             return 1
         cmd = judge.build_pi_cmd({"model": model, "thinking": args.thinking or cfg.get("thinking"),
                                   "prompt": str(args.prompt),
-                                  "tools": cfg.get("tools", []) if args.tools is None else args.tools},
+                                  "tools": args.tools},
                                  "<prompt>", cfg.get("pi_bin", "pi"), cfg.get("pi_extra_args"))
         print(" ".join(repr(c) if " " in c or "\n" in c else c for c in cmd))
         return 0
@@ -237,7 +243,7 @@ def main() -> int:
     with (run_dir / "run_config.json").open("x") as fh:
         json.dump({
             "config": cfg, "model": model, "thinking": args.thinking or cfg.get("thinking"),
-            "tools": cfg.get("tools", []) if args.tools is None else args.tools, "repeats": repeats,
+            "tools": args.tools, "response_mode": "tool", "repeats": repeats,
             "system_prompt": str(args.prompt.relative_to(ROOT)) if args.prompt.is_relative_to(ROOT) else str(args.prompt),
             "mock": args.mock, "started": time.strftime("%Y-%m-%d %H:%M:%S"),
         }, fh, indent=2)
