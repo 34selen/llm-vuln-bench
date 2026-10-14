@@ -23,6 +23,34 @@ def majority(votes: list[str | None]) -> str:
     return top if n * 2 > len(votes) else "SPLIT"
 
 
+def load_records(path: Path) -> list[dict]:
+    """Include legacy exception records by deriving their missing metadata."""
+    samples = json.loads((ROOT / "samples.json").read_text())
+    latest = {}
+    for line_number, line in enumerate(path.read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        parts = r.get("case_id", "").split("__")
+        if len(parts) == 3:
+            for key, value in zip(("sample", "label", "transform"), parts):
+                r.setdefault(key, value)
+        meta = samples.get(r.get("sample"), {})
+        r.setdefault("cwe", meta.get("cwe", "unknown"))
+        r.setdefault("language", meta.get("language", "c"))
+        r.setdefault("expected_vulnerable", r.get("label") == "vuln")
+        if not all(k in r for k in ("case_id", "repeat", "transform", "label")) or r["label"] not in ("vuln", "safe"):
+            raise ValueError(f"{path}:{line_number}: record has insufficient case metadata")
+        if r.get("pi_rc") not in (None, 0) and not r.get("error"):
+            r.update(error=f"pi exited with status {r['pi_rc']}", error_type="process_exit")
+        if r.get("pred_vulnerable") not in ("YES", "NO", "UNCERTAIN") and not r.get("error"):
+            r.update(error="could not parse a YES/NO/UNCERTAIN verdict", error_type="parse")
+        if r.get("error"):
+            r["pred_vulnerable"] = None
+        latest[(r["case_id"], r["repeat"])] = r
+    return list(latest.values())
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("run", help="run name under results/ or path to records.jsonl")
@@ -32,56 +60,56 @@ def main() -> int:
     if not rec_path.exists():
         print(f"not found: {rec_path}", file=sys.stderr)
         return 1
-    recs = [json.loads(l) for l in rec_path.read_text().splitlines() if l.strip()]
-    recs = [r for r in recs if "transform" in r]
-    latest = {}
-    for r in recs:  # a case re-evaluated after its code changed replaces the older record
-        latest[(r["case_id"], r["repeat"])] = r
-    recs = list(latest.values())
+    try:
+        recs = load_records(rec_path)
+    except (OSError, ValueError) as e:
+        print(f"cannot load records: {e}", file=sys.stderr)
+        return 1
     if not recs:
         print("no records", file=sys.stderr)
         return 1
     out_dir = rec_path.parent
     transforms = [t for t in ORDER if any(r["transform"] == t for r in recs)] + \
                  sorted({r["transform"] for r in recs} - set(ORDER))
+    languages = sorted({r["language"] for r in recs})
 
     # ---- per-transform stats, split by label -------------------------------
     rows = []
-    for label in ("vuln", "safe"):
-        for t in transforms:
-            rs = [r for r in recs if r["transform"] == t and r["label"] == label]
-            if not rs:
-                continue
-            n = len(rs)
-            yes = sum(r.get("pred_vulnerable") == "YES" for r in rs)
-            no = sum(r.get("pred_vulnerable") == "NO" for r in rs)
-            unc = sum(r.get("pred_vulnerable") == "UNCERTAIN" for r in rs)
-            none = n - yes - no - unc
-            cwe_ok = sum(r.get("pred_vulnerable") == "YES" and r.get("pred_cwe") == r["cwe"] for r in rs)
-            errs = sum(1 for r in rs if r.get("error"))
-            toks_in = [r["usage"].get("input", 0) + r["usage"].get("cacheRead", 0) for r in rs if r.get("usage")]
-            toks_out = [r["usage"].get("output", 0) for r in rs if r.get("usage")]
-            el = [r.get("elapsed_sec", 0) for r in rs]
-            reasoning = [(r.get("usage") or {}).get("reasoning", 0) for r in rs]
-            thought = sum(1 for r in rs if (r.get("usage") or {}).get("reasoning", 0) > 0 or r.get("thinking_chars", 0) > 0)
-            rows.append({
-                "label": label, "transform": t, "n": n, "yes": yes, "no": no, "uncertain": unc, "unparsed": none,
-                "yes_rate": yes / n, "cwe_match_rate": (cwe_ok / n) if label == "vuln" else None,
-                "errors": errs,
-                "avg_in_tokens": round(sum(toks_in) / len(toks_in)) if toks_in else None,
-                "avg_out_tokens": round(sum(toks_out) / len(toks_out)) if toks_out else None,
-                "avg_sec": round(sum(el) / len(el), 1) if el else None,
-                "thinking_rate": thought / n,
-                "avg_reasoning_tokens": round(sum(reasoning) / n),
-            })
+    groups = [(language, label, t) for language in languages for label in ("vuln", "safe") for t in transforms]
+    for language, label, t in groups:
+        rs = [r for r in recs if r["language"] == language and r["transform"] == t and r["label"] == label]
+        if not rs:
+            continue
+        n = len(rs)
+        yes = sum(r.get("pred_vulnerable") == "YES" for r in rs)
+        no = sum(r.get("pred_vulnerable") == "NO" for r in rs)
+        unc = sum(r.get("pred_vulnerable") == "UNCERTAIN" for r in rs)
+        none = n - yes - no - unc
+        cwe_ok = sum(r.get("pred_vulnerable") == "YES" and r.get("pred_cwe") == r["cwe"] for r in rs)
+        errs = sum(1 for r in rs if r.get("error"))
+        toks_in = [r["usage"].get("input", 0) + r["usage"].get("cacheRead", 0) for r in rs if r.get("usage")]
+        toks_out = [r["usage"].get("output", 0) for r in rs if r.get("usage")]
+        el = [r.get("elapsed_sec", 0) for r in rs]
+        reasoning = [(r.get("usage") or {}).get("reasoning", 0) for r in rs]
+        thought = sum(1 for r in rs if (r.get("usage") or {}).get("reasoning", 0) > 0 or r.get("thinking_chars", 0) > 0)
+        rows.append({
+            "language": language, "label": label, "transform": t, "n": n, "yes": yes, "no": no, "uncertain": unc, "unparsed": none,
+            "yes_rate": yes / n, "cwe_match_rate": (cwe_ok / n) if label == "vuln" else None,
+            "errors": errs,
+            "avg_in_tokens": round(sum(toks_in) / len(toks_in)) if toks_in else None,
+            "avg_out_tokens": round(sum(toks_out) / len(toks_out)) if toks_out else None,
+            "avg_sec": round(sum(el) / len(el), 1) if el else None,
+            "thinking_rate": thought / n,
+            "avg_reasoning_tokens": round(sum(reasoning) / n),
+        })
 
     # ---- per CWE x transform detection (vuln only) ------------------------
-    cwes = sorted({r["cwe"] for r in recs})
+    language_cwes = sorted({(r["language"], r["cwe"]) for r in recs})
     grid = defaultdict(lambda: defaultdict(lambda: [0, 0]))
     for r in recs:
         if r["label"] != "vuln":
             continue
-        cell = grid[r["cwe"]][r["transform"]]
+        cell = grid[(r["language"], r["cwe"])][r["transform"]]
         cell[1] += 1
         cell[0] += r.get("pred_vulnerable") == "YES"
 
@@ -94,7 +122,7 @@ def main() -> int:
         votes = [r.get("pred_vulnerable") for r in rs]
         m = majority(votes)
         exp = "YES" if rs[0]["expected_vulnerable"] else "NO"
-        maj_rows.append((cid, rs[0]["label"], rs[0]["transform"], exp, m, "+".join(v or "-" for v in votes), m == exp))
+        maj_rows.append((cid, rs[0]["language"], rs[0]["label"], rs[0]["transform"], exp, m, "+".join(v or "-" for v in votes), m == exp))
 
     # ---- write ------------------------------------------------------------
     with (out_dir / "summary.csv").open("w", newline="") as fh:
@@ -112,32 +140,34 @@ def main() -> int:
     md.append(f"- records: {len(recs)}  cases: {len(by_case)}\n")
 
     md.append("## Detection by transform\n")
-    md.append("| label | transform | n | YES | NO | UNCERTAIN | unparsed | YES rate | CWE match | avg in tok | avg out tok | thinking | avg reasoning tok | avg sec |")
-    md.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    md.append("| language | label | transform | n | YES | NO | UNCERTAIN | unparsed | errors | YES rate | CWE match | avg in tok | avg out tok | thinking | avg reasoning tok | avg sec |")
+    md.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
-        md.append(f"| {r['label']} | {r['transform']} | {r['n']} | {r['yes']} | {r['no']} | {r['uncertain']} | {r['unparsed']} | "
+        md.append(f"| {r['language']} | {r['label']} | {r['transform']} | {r['n']} | {r['yes']} | {r['no']} | {r['uncertain']} | {r['unparsed']} | {r['errors']} | "
                   f"{pct(r['yes'], r['n'])} | {pct(round(r['cwe_match_rate'] * r['n']), r['n']) if r['cwe_match_rate'] is not None else '-'} | "
                   f"{r['avg_in_tokens'] or '-'} | {r['avg_out_tokens'] or '-'} | {pct(round(r['thinking_rate'] * r['n']), r['n'])} | "
                   f"{r['avg_reasoning_tokens']} | {r['avg_sec'] or '-'} |")
     md.append("\nFor `vuln` rows the YES rate is the detection rate (higher = transform failed to evade). "
               "For `safe` rows it is the false-positive rate. `thinking` = share of calls where the model emitted reasoning "
-              "(GLM 5.3 reasons on its own even with thinking=off).\n")
+              "(GLM 5.3 reasons on its own even with thinking=off). "
+              "Errors remain in `n` and `unparsed` and never count as YES, NO, or UNCERTAIN. "
+              "YES rate uses all evaluations, so check errors before interpreting a lower detection rate as evasion.\n")
 
-    md.append("## Detection rate per CWE x transform (vuln cases)\n")
-    md.append("| CWE | " + " | ".join(transforms) + " |")
-    md.append("|---|" + "---:|" * len(transforms))
-    for c in cwes:
+    md.append("## Detection rate per language x CWE x transform (vuln cases)\n")
+    md.append("| language | CWE | " + " | ".join(transforms) + " |")
+    md.append("|---|---|" + "---:|" * len(transforms))
+    for language, c in language_cwes:
         cells = []
         for t in transforms:
-            y, n = grid[c][t]
+            y, n = grid[(language, c)][t]
             cells.append(f"{y}/{n}" if n else "-")
-        md.append(f"| {c} | " + " | ".join(cells) + " |")
+        md.append(f"| {language} | {c} | " + " | ".join(cells) + " |")
 
     md.append("\n## Majority vote per case\n")
-    md.append("| case | label | transform | expected | majority | votes | correct |")
-    md.append("|---|---|---|---|---|---|---|")
-    for cid, label, t, exp, m, votes, ok in maj_rows:
-        md.append(f"| {cid} | {label} | {t} | {exp} | {m} | {votes} | {'✓' if ok else '✗'} |")
+    md.append("| case | language | label | transform | expected | majority | votes | correct |")
+    md.append("|---|---|---|---|---|---|---|---|")
+    for cid, language, label, t, exp, m, votes, ok in maj_rows:
+        md.append(f"| {cid} | {language} | {label} | {t} | {exp} | {m} | {votes} | {'✓' if ok else '✗'} |")
     n_ok = sum(1 for *_, ok in maj_rows if ok)
     md.append(f"\nMajority-vote accuracy: {n_ok}/{len(maj_rows)} ({pct(n_ok, len(maj_rows)).strip()})\n")
 
@@ -145,7 +175,7 @@ def main() -> int:
     if errs:
         md.append(f"## Errors ({len(errs)})\n")
         for r in errs[:30]:
-            md.append(f"- {r['case_id']} r{r['repeat']}: {str(r['error'])[:160]}")
+            md.append(f"- {r['case_id']} r{r['repeat']} [{r.get('error_type') or 'error'}]: {str(r['error'])[:160]}")
     (out_dir / "summary.md").write_text("\n".join(md) + "\n")
     print("\n".join(md))
     print(f"\n-> {out_dir / 'summary.md'}, {out_dir / 'summary.csv'}")

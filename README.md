@@ -1,15 +1,17 @@
 # LLM 취약점 탐지 교란 벤치마크 (pi + GLM 5.3)
 
-`cases/` 에 들어 있는 C 코드를 pi 코딩 에이전트(GLM 5.3)에게 보여 주고 취약 여부를 판별시킨 뒤,
+`cases/` 에 들어 있는 소스 코드를 pi 코딩 에이전트(GLM 5.3)에게 보여 주고 취약 여부를 판별시킨 뒤,
 변형 조건별 탐지율·오탐율·보류율을 집계한다. 4주차 보고서의 검증 실험 1·2를 반복 가능하게 만든 것이다.
 
 변형 코드는 이 레포에서 만들지 않는다. 사람이 (Claude Code 등으로) 만들어 `cases/` 에 넣으면 레포는 평가와 집계만 한다.
+케이스의 취약/안전 라벨과 변형 후 취약점 보존 여부는 사전 검수로 확정하며, 플랫폼은 입력된 라벨을 정답으로 사용한다.
 
 ```
-samples.json     샘플 이름 → CWE, 제목, 대상 함수 조회표
-cases/<sample>__<label>__<name>/code.c       평가할 코드 (사람이 넣음) + 선택적 case.json
+samples.json     샘플 이름 → CWE, 제목, 언어, 대상 함수
+cases/<sample>__<label>__<name>/code.*      평가할 코드 (사람이 넣음) + 선택적 case.json
+benchcore/       judge.py (pi 호출·응답 파싱)
 run_pi.py        pi로 GLM 호출 → results/<run>/records.jsonl
-aggregate.py     조건별 탐지율 / CWE 일치율 / 보류율 / 다수결 → summary.md, summary.csv
+aggregate.py     언어·조건별 탐지율 / CWE 일치율 / 보류율 / 오류 / 다수결 → summary.md, summary.csv
 run_all.sh       run → aggregate
 config.json      모델, thinking, 반복 횟수, 병렬 수
 prompts/         system.md (도달 가능한 취약점을 묻는 기본 판정 프롬프트), system_any.md (도달 여부 무시, 위험 패턴 존재만 묻는 프롬프트), user.md (코드 템플릿)
@@ -42,15 +44,17 @@ python3 aggregate.py glm53_notools
 
 ```bash
 python3 run_pi.py --mock                        # API 없이 파이프라인 점검
-python3 run_pi.py --dry-run                     # 실제 pi 명령만 출력
+python3 run_pi.py --dry-run                     # 실제 pi 명령만 출력 (결과 폴더 생성 없음)
 python3 run_pi.py --filter __sat3 --limit 2     # 일부만
 python3 run_pi.py --tools read,bash --run-name glm53_tools   # 도구 허용 (기본은 --no-tools, 1턴 호출)
 python3 run_pi.py --model zai-api/glm-5.3 ...   # 엔드포인트 변경
 python3 run_pi.py --prompt prompts/system_any.md --run-name glm53_think_any   # 판정 프롬프트 교체
 ```
 
-같은 run-name 으로 다시 실행하면 이미 평가된 (케이스, 반복)은 건너뛴다.
-단 `code.c` 내용이 바뀐 케이스는 다시 평가한다 (코드 해시로 판단). 집계는 (케이스, 반복)별 최신 기록만 쓴다.
+run-name 은 한 번만 사용할 수 있다. 같은 이름의 파일이나 폴더가 이미 있으면 실행을 거절하며,
+기존 설정·기록·원문을 덮어쓰거나 이어 쓰지 않는다. 중단된 실험도 새 run-name 으로 실행한다.
+이름을 생략하면 모델 이름과 마이크로초까지 포함한 시각으로 자동 생성한다.
+`aggregate.py` 는 기존 기록에서 요약 파일을 다시 생성할 수 있다.
 
 ## 케이스 추가하기
 
@@ -58,17 +62,30 @@ python3 run_pi.py --prompt prompts/system_any.md --run-name glm53_think_any   # 
    - `<sample>`: `samples.json` 에 있는 이름 (cwe89_sqli, cwe78_cmdi, cwe121_sbo, cwe22_path, cwe190_intov)
    - `<label>`: `vuln` 또는 `safe` (정답 라벨)
    - `<name>`: 변형 이름. 집계표의 행이 된다 (original, sat3, mytrick ...)
-2. 그 안에 `code.c` 를 넣는다.
+2. 취약/안전 판정 근거와 변형 후 취약점 보존 여부를 사람이 검수하여 라벨을 확정하고, 그 안에 소스 파일을 넣는다.
 3. `python3 run_pi.py --run-name <run> --filter __<name>` 으로 그 변형만 평가하고 `aggregate.py` 로 집계한다.
 
-`case.json` 은 선택 사항이다. 폴더명에서 sample/label/transform 을 읽고, CWE·함수명은 `samples.json` 에서 가져온다.
+`case.json` 은 선택 사항이다. 폴더명에서 sample/label/transform 을 읽고, CWE·함수명·언어는 `samples.json` 에서 가져온다.
+소스 경로는 `case.json` 의 `source`, `samples.json` 의 `source` 순으로 선택하며,
+둘 다 없으면 폴더 안의 `code.*` 파일 한 개를 사용한다 (`code.c`, `code.cpp`, `code.py`, `code.sol` 등).
+`source` 는 케이스 폴더 안의 파일을 가리키는 상대 경로다. 여러 `code.*` 파일이 있으면 명시해야 한다.
 
-현재 들어 있는 50개 케이스는 2026-10-07에 생성한 것으로, 변형 5종(original, algebraic, sat3, smt, combo) × 샘플 5개 × {vuln, safe} 이다.
-모두 대상 함수 본문을 `if (항상참) { 원본 } else { safe.c 본문 }` 으로 감싼 형태다.
+예를 들어 Python 코드를 `src/main.py` 에 넣었다면 `case.json` 을 다음과 같이 작성한다.
+
+```json
+{ "language": "python", "source": "src/main.py" }
+```
+
+언어와 소스 경로는 판정 프롬프트와 결과 기록에 전달된다. 한 케이스는 소스 파일 하나를 평가한다.
+
+`cases/` 는 비어 있다. 평가할 케이스는 실험할 때마다 넣는다.
+아래 "결과" 절의 65개 케이스(변형 8종 × 샘플 5개)는 커밋 `d62241a` 의 `cases/` 에 있다
+(`git checkout d62241a -- cases` 로 되살린다).
 
 ## 샘플 추가하기
 
-`samples.json` 에 항목을 추가하고, 원본 코드는 `cases/<이름>__vuln__original/code.c` (와 `__safe__original`) 로 넣는다.
+`samples.json` 에 항목을 추가하고, 원본 코드는 `cases/<이름>__vuln__original/code.*` (와 `__safe__original`) 로 넣는다.
+`language` 는 실제 소스 언어로 지정한다. 케이스별로 `case.json` 에서 덮어쓸 수 있다.
 
 ```json
 "cwe89_sqli": { "cwe": "CWE-89", "title": "SQL Injection", "language": "c", "function": "lookup_user" }
@@ -106,8 +123,20 @@ GLM 5.3, thinking medium, 도구 없음, 케이스당 3회. 숫자는 **15회 �
 - `vuln` 행의 YES rate = 탐지율. 낮을수록 변형이 교란에 성공.
 - `safe` 행의 YES rate = 오탐율.
 - UNCERTAIN = 보고서의 "판단 보류". YES/NO 와 별도로 집계.
+- 호출 예외, timeout, 비정상 종료, 판정 파싱 실패는 `error` 와 `error_type` 으로 기록한다.
+  실패도 표본 수 `n`, `unparsed`, `errors` 에 포함되며 YES/NO/UNCERTAIN 으로 집계하지 않는다.
+  YES rate 의 분모는 전체 평가 수이므로, 탐지율 하락을 교란 효과로 해석하기 전에 오류 수를 확인한다.
+- 집계는 언어별로 나눈다. 언어 정보가 없는 기존 C 실험 기록은 샘플의 언어를 사용한다.
 - CWE match = YES 이면서 CWE 번호까지 맞춘 비율.
-- `results/<run>/raw/` 에 pi 의 JSONL 원문(usage, 비용 포함)이 남는다.
+- `results/<run>/raw/` 에 pi 의 JSONL 원문(usage, 비용 포함)이 남는다. 재시도 원문은 `.attempt2.jsonl` 등의 별도 파일로 보관한다.
+
+## 파이프라인 검증
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+테스트는 임시 디렉터리와 모의 응답을 사용하며 API 호출이나 기존 실험 기록 수정 없이 실행된다.
 
 ## 주의
 
@@ -115,4 +144,4 @@ GLM 5.3, thinking medium, 도구 없음, 케이스당 3회. 숫자는 **15회 �
   GLM 5.3 은 thinking off 를 보내도 스스로 추론하므로 off 는 통제된 조건이 아니다. 평가는 thinking 을 켠 상태로만 한다.
   도구를 켜면 모델이 코드를 컴파일·실행하거나 조건식을 직접 풀 수 있어 실험 조건이 달라진다.
 - temperature 는 pi 기본값. 결과 변동은 반복 횟수(`repeats`)로 흡수한다.
-- 변형본이 원본의 취약점을 실제로 유지하는지는 이 레포가 검사하지 않는다. 케이스를 넣는 사람이 책임진다.
+- 정답 라벨과 변형본의 취약점 보존 여부는 자동 검증하지 않는다. 케이스를 넣기 전에 사람이 검수해야 한다.

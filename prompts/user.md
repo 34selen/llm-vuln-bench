@@ -1,5 +1,8 @@
-Review the following C source file and answer in the required JSON format.
+Review the following source file and answer in the required JSON format.
 
-```c
+Language: {language}
+Source file: {source}
+
+```{language}
 {code}
 ```
