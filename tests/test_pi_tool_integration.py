@@ -77,18 +77,37 @@ class PiToolIntegrationTests(unittest.TestCase):
         out = self.invoke()
         self.assertIsNone(out["parsed"]["error"], out)
         self.assertEqual(out["verdict"], {**self.verdict, "parse": "tool"})
+        self.assertEqual(out["parsed"]["invalid_tool_calls"], 0)
         self.assertEqual(len(self.requests), 1)
         self.assertEqual([t["function"]["name"] for t in self.requests[0]["tools"]], ["submit_verdict"])
         parameters = self.requests[0]["tools"][0]["function"]["parameters"]
         self.assertEqual(parameters["required"], judge.VERDICT_SCHEMA["required"])
 
-    def test_invalid_call_ends_attempt_and_retries_with_a_fresh_call(self):
-        invalid = {**self.verdict, "vulnerable": "NO IDEA"}
+    def test_invalid_call_reports_the_field_and_model_resubmits_in_session(self):
+        invalid = {**self.verdict, "cwe": "null"}
         self.responses = [{"calls": [invalid]}, {"calls": [self.verdict]}]
+        out = self.invoke(retries=0)
+        self.assertIsNone(out["parsed"]["error"], out)
+        self.assertEqual(out["verdict"]["vulnerable"], "YES")
+        self.assertEqual(out["parsed"]["invalid_tool_calls"], 1)
+        self.assertEqual(len(self.requests), 2)
+        feedback = [m for m in self.requests[1]["messages"] if m.get("role") == "tool"]
+        self.assertIn("cwe", json.dumps(feedback))
+        self.assertFalse((self.directory / "raw.attempt2.jsonl").exists())
+
+    def test_omitted_optional_fields_are_accepted(self):
+        self.responses = [{"calls": [{"vulnerable": "NO", "confidence": 90, "reason": "Offline fixture"}]}]
+        out = self.invoke()
+        self.assertIsNone(out["parsed"]["error"], out)
+        self.assertIsNone(out["verdict"]["cwe"])
+
+    def test_repeated_invalid_calls_end_attempt_and_retry_with_a_fresh_call(self):
+        invalid = {**self.verdict, "vulnerable": "NO IDEA"}
+        self.responses = [{"calls": [invalid]}] * 3 + [{"calls": [self.verdict]}]
         out = self.invoke(retries=1)
         self.assertIsNone(out["parsed"]["error"], out)
         self.assertEqual(out["verdict"]["vulnerable"], "YES")
-        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(len(self.requests), 4)
         self.assertTrue((self.directory / "raw.attempt2.jsonl").exists())
 
     def test_plain_json_response_is_not_a_submission(self):

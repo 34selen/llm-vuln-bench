@@ -60,17 +60,17 @@ def empty_verdict() -> dict:
 def validate_verdict(value) -> dict:
     """Validate the flat tool schema without coercion or third-party dependencies."""
     properties = VERDICT_SCHEMA["properties"]
-    if not isinstance(value, dict) or set(value) != set(VERDICT_SCHEMA["required"]):
-        raise ValueError("submit_verdict requires exactly the six schema fields")
+    if not isinstance(value, dict) or not set(VERDICT_SCHEMA["required"]) <= set(value) <= set(properties):
+        raise ValueError("submit_verdict requires the schema's required fields and no unknown fields")
     for name, rule in properties.items():
+        if name not in value:  # optional field omitted: not applicable
+            continue
         item = value[name]
         allowed = rule["type"] if isinstance(rule["type"], list) else [rule["type"]]
         integer = type(item) is int or (type(item) is float and item.is_integer())
         kind = "null" if item is None else "string" if isinstance(item, str) else "integer" if integer else "invalid"
         if kind not in allowed:
             raise ValueError(f"invalid type for submit_verdict.{name}")
-        if item is None:
-            continue
         if "enum" in rule and item not in rule["enum"]:
             raise ValueError(f"invalid submit_verdict.{name}: {item!r}")
         if isinstance(item, str):
@@ -78,7 +78,26 @@ def validate_verdict(value) -> dict:
                 raise ValueError(f"invalid submit_verdict.{name}")
         elif item < rule.get("minimum", item) or item > rule.get("maximum", item):
             raise ValueError(f"out-of-range submit_verdict.{name}")
+    value = {**dict.fromkeys(properties), **value}
     return {**value, **{k: int(value[k]) for k in ("line", "confidence") if value[k] is not None}, "parse": "tool"}
+
+
+def sum_usage(usages: list[dict | None]) -> dict | None:
+    """Add token counts and the provider-reported cost of several model calls."""
+    usages = [u for u in usages if u]
+    if not usages:
+        return None
+    usage = {}
+    for u in usages:
+        for key, value in u.items():
+            if isinstance(value, (int, float)):
+                usage[key] = usage.get(key, 0) + value
+            elif key == "cost" and isinstance(value, dict):
+                cost = usage.setdefault("cost", {})
+                for k, v in value.items():
+                    if isinstance(v, (int, float)):
+                        cost[k] = cost.get(k, 0) + v
+    return usage
 
 
 def parse_json_stream(stdout: str) -> dict:
@@ -87,7 +106,8 @@ def parse_json_stream(stdout: str) -> dict:
     starts, submissions = {}, []
     error = None
     verdict_error = None
-    tool_calls = 0
+    invalid_error = None
+    tool_calls = invalid_calls = 0
     for line in stdout.split("\n"):
         try:
             ev = json.loads(line.strip("\r"))
@@ -130,7 +150,11 @@ def parse_json_stream(stdout: str) -> dict:
             if ev.get("isError") is not False or not isinstance(result, dict) or result.get("isError"):
                 content = result.get("content", []) if isinstance(result, dict) else []
                 detail = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
-                verdict_error = "submit_verdict execution failed: " + detail[:300]
+                invalid_calls += 1
+                invalid_error = "submit_verdict execution failed: " + detail[:300]
+                if submissions:  # a call after a recorded verdict is a duplicate submission
+                    verdict_error = invalid_error
+                # Otherwise the model saw the error and may resubmit; only the final outcome matters.
                 continue
             try:
                 verdict = validate_verdict(args)
@@ -145,22 +169,11 @@ def parse_json_stream(stdout: str) -> dict:
     if starts:
         verdict_error = "submit_verdict did not finish"
     if len(submissions) != 1:
-        verdict_error = verdict_error or "expected exactly one successful submit_verdict call"
-    usage = None
-    if usages:
-        usage = {}
-        for u in usages:
-            for key, value in u.items():
-                if isinstance(value, (int, float)):
-                    usage[key] = usage.get(key, 0) + value
-                elif key == "cost" and isinstance(value, dict):
-                    cost = usage.setdefault("cost", {})
-                    for k, v in value.items():
-                        if isinstance(v, (int, float)):
-                            cost[k] = cost.get(k, 0) + v
+        verdict_error = verdict_error or invalid_error or "expected exactly one successful submit_verdict call"
+    usage = sum_usage(usages)
     return {
         "text": "\n".join(text_parts).strip(), "thinking": "\n".join(thinking_parts).strip(),
-        "usage": usage, "tool_calls": tool_calls, "error": error,
+        "usage": usage, "tool_calls": tool_calls, "invalid_tool_calls": invalid_calls, "error": error,
         "verdict": submissions[0] if not verdict_error else empty_verdict(),
         "verdict_error": verdict_error,
     }
@@ -170,9 +183,10 @@ def mock_verdict(seed: str, cwe: str, function: str) -> dict:
     """Deterministic fake answer for pipeline tests (no API call)."""
     rng = random.Random(seed)
     v = rng.choices(["YES", "NO", "UNCERTAIN"], weights=[0.7, 0.2, 0.1])[0]
-    verdict = {"vulnerable": v, "cwe": cwe if v == "YES" and rng.random() < 0.8 else None,
-                       "function": function, "line": rng.randint(5, 30), "confidence": rng.randint(40, 99),
-                       "reason": "mock"}
+    verdict = {"vulnerable": v, "function": function, "line": rng.randint(5, 30),
+               "confidence": rng.randint(40, 99), "reason": "mock"}
+    if v == "YES" and rng.random() < 0.8:
+        verdict["cwe"] = cwe
     events = [
         {"type": "message_end", "message": {"role": "assistant", "content": [], "usage": {"input": 1000, "output": 80}}},
         {"type": "tool_execution_start", "toolName": VERDICT_TOOL, "toolCallId": "mock", "args": verdict},
@@ -199,6 +213,7 @@ def run(code: str, judge: dict, *, source: str = "code.c",
     prompt = render_prompt(code, source)
     cmd = build_pi_cmd(judge, prompt, pi_bin, extra_args)
     parsed, rc, stderr = None, None, ""
+    attempt_usages = []
     for attempt in range(retries + 1):
         stdout = ""
         execution_error = None
@@ -219,6 +234,9 @@ def run(code: str, judge: dict, *, source: str = "code.c",
                 rc, stderr = None, str(e)
                 execution_error, execution_type = f"{type(e).__name__}: {e}", "execution"
         parsed = parse_json_stream(stdout)
+        # Failed attempts are billed too, so usage covers every attempt of this evaluation.
+        attempt_usages.append(parsed["usage"])
+        parsed.update(usage=sum_usage(attempt_usages), attempts=attempt + 1)
         if raw_path:
             attempt_path = raw_path if attempt == 0 else raw_path.with_name(f"{raw_path.stem}.attempt{attempt + 1}{raw_path.suffix}")
             attempt_path.write_text(stdout)

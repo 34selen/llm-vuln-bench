@@ -34,7 +34,8 @@ LLM 취약점 탐지 교란 벤치마크. `cases/` 의 소스 코드를 pi 코�
 - 실패 기록에도 케이스·언어·소스·실험 조건을 유지한다. 오류는 `error_type` 으로 분류하고 판정값을 비운다.
   집계에서 실패는 n/unparsed/errors 에 포함하며, 모델의 NO/UNCERTAIN 과 구분한다.
 - 판정은 성공한 submit_verdict 호출 하나에서만 읽는다. 텍스트 JSON 을 판정으로 파싱하지 않는다.
-  호출 누락·스키마 위반·실행 실패·중복 제출은 재시도한다. response_mode 와 제출 인자를 기록한다.
+  스키마 위반은 도구 오류 메시지로 모델에게 돌려주어 같은 세션에서 재제출하게 한다 (3회 실패하면 그 시도를 중단, `invalid_tool_calls` 기록).
+  호출 누락·실행 실패·중복 제출·재제출 한도 초과는 재시도한다. response_mode 와 제출 인자를 기록한다.
 - `results/*/raw/` 와 `.env` 는 git 제외. API 키(`ZAI_API_KEY`)를 커밋하거나 출력하지 말 것.
 - 실험 조건은 thinking=medium, submit_verdict 도구 하나가 기본이다. read/bash 등의 다른 도구는 허용하지 않는다.
   GLM 5.3 은 thinking off 여도 추론하므로 off 는 통제 조건이 아니다. 기존 results/ 는 JSON 텍스트 방식의 과거 실험이다.

@@ -90,6 +90,7 @@ def main() -> int:
         toks_in = [r["usage"].get("input", 0) + r["usage"].get("cacheRead", 0) for r in rs if r.get("usage")]
         toks_out = [r["usage"].get("output", 0) for r in rs if r.get("usage")]
         el = [r.get("elapsed_sec", 0) for r in rs]
+        costs = [((r.get("usage") or {}).get("cost") or {}).get("total", 0) for r in rs]
         reasoning = [(r.get("usage") or {}).get("reasoning", 0) for r in rs]
         thought = sum(1 for r in rs if (r.get("usage") or {}).get("reasoning", 0) > 0 or r.get("thinking_chars", 0) > 0)
         rows.append({
@@ -101,6 +102,8 @@ def main() -> int:
             "avg_sec": round(sum(el) / len(el), 1) if el else None,
             "thinking_rate": thought / n,
             "avg_reasoning_tokens": round(sum(reasoning) / n),
+            "total_cost_usd": round(sum(costs), 4),
+            "total_sec": round(sum(el), 1),
         })
 
     # ---- per CWE x transform detection (vuln only) ------------------------
@@ -137,16 +140,20 @@ def main() -> int:
         md.append(f"# Benchmark summary: `{out_dir.name}`\n")
         md.append(f"- model: `{rc.get('model')}`  thinking: `{rc.get('thinking')}`  tools: `{rc.get('tools')}`  repeats: {rc.get('repeats')}  "
                   f"prompt: `{rc.get('system_prompt', 'prompts/system.md')}`  response mode: `{rc.get('response_mode', 'json')}`  mock: {rc.get('mock')}")
-    md.append(f"- records: {len(recs)}  cases: {len(by_case)}\n")
+    total_cost = sum(((r.get("usage") or {}).get("cost") or {}).get("total", 0) for r in recs)
+    total_tokens = sum((r.get("usage") or {}).get("totalTokens", 0) for r in recs)
+    total_sec = sum(r.get("elapsed_sec", 0) for r in recs)
+    md.append(f"- records: {len(recs)}  cases: {len(by_case)}  cost: ${total_cost:.4f}  tokens: {total_tokens}  "
+              f"call time: {total_sec / 60:.1f} min (sum over calls; wall time is shorter with jobs > 1)\n")
 
     md.append("## Detection by transform\n")
-    md.append("| language | label | transform | n | YES | NO | UNCERTAIN | unparsed | errors | YES rate | CWE match | avg in tok | avg out tok | thinking | avg reasoning tok | avg sec |")
-    md.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    md.append("| language | label | transform | n | YES | NO | UNCERTAIN | unparsed | errors | YES rate | CWE match | avg in tok | avg out tok | thinking | avg reasoning tok | avg sec | cost USD |")
+    md.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
         md.append(f"| {r['language']} | {r['label']} | {r['transform']} | {r['n']} | {r['yes']} | {r['no']} | {r['uncertain']} | {r['unparsed']} | {r['errors']} | "
                   f"{pct(r['yes'], r['n'])} | {pct(round(r['cwe_match_rate'] * r['n']), r['n']) if r['cwe_match_rate'] is not None else '-'} | "
                   f"{r['avg_in_tokens'] or '-'} | {r['avg_out_tokens'] or '-'} | {pct(round(r['thinking_rate'] * r['n']), r['n'])} | "
-                  f"{r['avg_reasoning_tokens']} | {r['avg_sec'] or '-'} |")
+                  f"{r['avg_reasoning_tokens']} | {r['avg_sec'] or '-'} | {r['total_cost_usd']:.4f} |")
     md.append("\nFor `vuln` rows the YES rate is the detection rate (higher = transform failed to evade). "
               "For `safe` rows it is the false-positive rate. `thinking` = share of calls where the model emitted reasoning "
               "(GLM 5.3 reasons on its own even with thinking=off). "

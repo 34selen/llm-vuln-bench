@@ -85,19 +85,20 @@ run-name 은 한 번만 사용할 수 있다. 같은 이름의 파일이나 폴�
 파일 읽기나 코드 실행 기능은 없다. pi 는 발견된 확장을 비활성화하고 레포의 제출 도구만 명시적으로 로드한다.
 활성 도구는 `submit_verdict` 하나로 제한한다 (`--tools read,bash` 같은 다른 도구 설정은 거절한다).
 
-공통 입력 스키마는 `benchcore/verdict.schema.json` 에 있다. 모든 필드가 필수이며 알 수 없는 필드는 거절한다.
+공통 입력 스키마는 `benchcore/verdict.schema.json` 에 있다. `vulnerable`, `confidence`, `reason` 은 필수이고 `cwe`, `function`, `line` 은 해당 없으면 생략한다 (기록에는 null). 알 수 없는 필드는 거절한다.
 
 | 필드 | 조건 |
 |---|---|
 | vulnerable | YES / NO / UNCERTAIN |
-| cwe | CWE-번호 또는 null |
-| function | 비어 있지 않은 함수 이름 또는 null |
-| line | 1 이상의 정수 또는 null |
+| cwe | CWE-번호, 해당 없으면 생략 |
+| function | 비어 있지 않은 함수 이름, 해당 없으면 생략 |
+| line | 1 이상의 정수, 해당 없으면 생략 |
 | confidence | 0~100 정수 |
 | reason | 비어 있지 않은 판단 근거 |
 
 Python 은 성공한 도구 실행의 호출 ID와 인자·결과를 대조하고 스키마를 다시 검증한다.
-텍스트 응답은 로그에만 보관한다. 도구 호출 누락, 잘못된 인자, 실패·미완료·중복 호출은 재시도하며,
+텍스트 응답은 로그에만 보관한다. 인자가 잘못되면 도구가 어느 필드가 왜 틀렸는지 돌려주고, 모델은 같은 세션에서 다시 제출한다
+(최대 3회, 횟수는 `invalid_tool_calls` 로 기록). 그래도 실패하거나 호출 누락·미완료·중복 호출이면 재시도하며,
 기본 `retries=2` 는 최초 호출 이후 최대 2회 추가 호출한다는 뜻이다. 모두 실패하면 판정값 없이 오류로 기록한다.
 `records.jsonl` 에는 `response_mode: "tool"`, 제출 인자(`tool_arguments`), `pred_parse: "tool"` 이 남는다.
 

@@ -82,12 +82,24 @@ class JudgeTests(unittest.TestCase):
             self.assertEqual(raw.read_text(), bad)
             self.assertEqual(raw.with_name("response.attempt2.jsonl").read_text(), good)
 
+    def test_usage_and_cost_include_failed_attempts(self):
+        usage = {"input": 100, "output": 20, "cost": {"total": 0.01}}
+        bad = stream("not a verdict", usage=usage)
+        good = tool_stream(verdict(vulnerable="NO"))
+        responses = [subprocess.CompletedProcess([], 0, s, "") for s in (bad, good)]
+        with patch.object(judge.subprocess, "run", side_effect=responses), patch.object(judge.time, "sleep"):
+            out = judge.run("source", {"model": "fake"}, retries=1)
+        self.assertEqual(out["parsed"]["attempts"], 2)
+        self.assertEqual(out["parsed"]["usage"]["input"], 200)
+        self.assertEqual(out["parsed"]["usage"]["cost"], {"total": 0.01})
+
     def test_uncertain_is_a_valid_prediction(self):
-        response = subprocess.CompletedProcess([], 0, tool_stream(verdict(vulnerable="UNCERTAIN", cwe=None, function=None, line=None)), "")
+        response = subprocess.CompletedProcess([], 0, tool_stream({"vulnerable": "UNCERTAIN", "confidence": 50, "reason": "fixture"}), "")
         with patch.object(judge.subprocess, "run", return_value=response):
             out = judge.run("source", {"model": "fake"}, retries=0)
         self.assertIsNone(out["parsed"]["error"])
         self.assertEqual(out["verdict"]["vulnerable"], "UNCERTAIN")
+        self.assertIsNone(out["verdict"]["cwe"])
 
     def test_invalid_verdict_values_retry_until_valid_tool_call(self):
         for arguments in [verdict(vulnerable="NO IDEA"), verdict(vulnerable="MAYBE", reason="VULNERABLE: YES")]:
@@ -115,12 +127,26 @@ class JudgeTests(unittest.TestCase):
         del missing["reason"]
         invalid = [missing, verdict(extra="field"), verdict(confidence=101), verdict(confidence=-1),
                    verdict(confidence=True), verdict(confidence="90"), verdict(line=0),
-                   verdict(line=True), verdict(cwe="121"), verdict(reason=""), verdict(function=42)]
+                   verdict(line=True), verdict(cwe="121"), verdict(cwe="null"), verdict(cwe=None),
+                   verdict(reason=""), verdict(function=42)]
         for arguments in invalid:
             with self.subTest(arguments=arguments):
                 parsed = judge.parse_json_stream(tool_stream(arguments))
                 self.assertIsNone(parsed["verdict"]["vulnerable"])
                 self.assertTrue(parsed["verdict_error"])
+
+    def test_omitted_optional_fields_are_recorded_as_null(self):
+        arguments = {"vulnerable": "NO", "confidence": 95, "reason": "fixture"}
+        parsed = judge.parse_json_stream(tool_stream(arguments))
+        self.assertIsNone(parsed["verdict_error"])
+        self.assertEqual(parsed["verdict"], {**arguments, "cwe": None, "function": None, "line": None, "parse": "tool"})
+
+    def test_invalid_call_followed_by_valid_resubmission_succeeds(self):
+        data = tool_stream(verdict(cwe="null"), is_error=True) + tool_stream(verdict(vulnerable="NO"), call_id="call_2")
+        parsed = judge.parse_json_stream(data)
+        self.assertIsNone(parsed["verdict_error"])
+        self.assertEqual(parsed["verdict"]["vulnerable"], "NO")
+        self.assertEqual(parsed["invalid_tool_calls"], 1)
 
     def test_successful_tool_call_is_used_instead_of_final_text(self):
         parsed = judge.parse_json_stream(tool_stream() + stream('{"vulnerable":"NO"}'))
@@ -208,7 +234,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual({r["language"] for r in records}, {"c", "cpp", "python", "solidity"})
         self.assertEqual({r["source"] for r in records}, {"code.c", "code.cpp", "code.py", "code.sol"})
         self.assertTrue(all(r["response_mode"] == "tool" and r["pred_parse"] == "tool" and r["tool_calls"] == 1 for r in records))
-        self.assertTrue(all(set(r["tool_arguments"]) == set(judge.VERDICT_SCHEMA["required"]) for r in records))
+        self.assertTrue(all(set(r["tool_arguments"]) == set(judge.VERDICT_SCHEMA["properties"]) for r in records))
         cfg = json.loads((self.root / "results/languages/run_config.json").read_text())
         self.assertEqual((cfg["response_mode"], cfg["tools"]), ("tool", ["submit_verdict"]))
         rows = self.aggregate_cli("languages")
