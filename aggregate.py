@@ -10,7 +10,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-ORDER = ["original", "algebraic", "sat3", "smt", "combo"]
+ORDER = ["original", "algebraic", "sat3", "smt", "combo",
+         "sat3tree_s150", "sat3tree_s210", "sat3tree_s300",
+         "sat3tree_s1000", "sat3tree_s2300", "sat3tree_pad1000",
+         "sat3tree_const"]
 
 
 def pct(n: int, d: int) -> str:
