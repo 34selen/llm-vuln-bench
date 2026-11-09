@@ -163,6 +163,44 @@ def evaluate(case: dict, rep: int, cfg: dict, args, raw_dir: Path) -> dict:
 # main
 # --------------------------------------------------------------------------
 
+def format_progress(done: int, total: int, case_id: str, rep: int, rec: dict) -> list[str]:
+    """One scannable line per evaluation, plus why it came out that way.
+
+    The verdict alone does not say whether the judge decided the question or
+    skipped it, so the reason goes in the log next to it.  Errors print in
+    full: a truncated error is the one you end up re-running to read.
+    """
+    usage = rec.get("usage") or {}
+    reasoning = usage.get("reasoning") or 0
+    bits = [f"{rec.get('elapsed_sec', 0)}s"]
+    if reasoning:
+        bits.append(f"{reasoning // 1000}k reasoning" if reasoning >= 1000
+                    else f"{reasoning} reasoning")
+    if (rec.get("attempts") or 1) > 1:
+        bits.append(f"{rec['attempts']} attempts")
+    if rec.get("invalid_tool_calls"):
+        bits.append(f"{rec['invalid_tool_calls']} invalid submissions")
+
+    if rec.get("error"):
+        head = (f"[run] ERR {done}/{total} {case_id} r{rep} -> no verdict "
+                f"({', '.join(bits)})")
+        why = (f"      err[{rec.get('error_type')}]: "
+               f"{str(rec['error']).strip()[:400]}")
+        if not rec.get("tool_calls"):
+            why += "  (submit_verdict never called)"
+        return [head, why]
+
+    verdict = rec.get("pred_vulnerable")
+    cwe = rec.get("pred_cwe") or ""
+    conf = rec.get("pred_confidence")
+    head = (f"[run] OK  {done}/{total} {case_id} r{rep} -> {verdict} {cwe}"
+            f"{f' conf={conf}' if conf is not None else ''} ({', '.join(bits)})")
+    reason = " ".join((rec.get("pred_reason") or "").split())
+    if not reason:
+        return [head]
+    return [head, f"      why: {reason[:220]}{'...' if len(reason) > 220 else ''}"]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(ROOT / "config.json"))
@@ -261,9 +299,8 @@ def main() -> int:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
             fh.flush()
             n_done += 1
-            mark = "ERR" if rec.get("error") else "OK "
-            print(f"[run] {mark}{n_done}/{len(jobs_list)} {case['id']} r{rep} -> {rec.get('pred_vulnerable')} {rec.get('pred_cwe') or ''} "
-                  f"({rec.get('elapsed_sec', 0)}s){' ERR: ' + str(rec['error'])[:80] if rec.get('error') else ''}")
+            for line in format_progress(n_done, len(jobs_list), case["id"], rep, rec):
+                print(line)
     print(f"[run] finished in {time.time() - t0:.0f}s -> {rec_path}")
     return 0
 
