@@ -163,6 +163,46 @@ def evaluate(case: dict, rep: int, cfg: dict, args, raw_dir: Path) -> dict:
 # main
 # --------------------------------------------------------------------------
 
+def reason_entry(case_id: str, rep: int, rec: dict) -> str:
+    """One readable block per evaluation for results/<run>/reasons.md.
+
+    records.jsonl already holds these fields, but reading why a judge decided
+    something should not require a jq incantation: this experiment turns on
+    the reasons, not just the verdicts.  The full reason is kept, untruncated.
+    """
+    usage = rec.get("usage") or {}
+    head = f"## {case_id} r{rep}"
+    meta = [f"expected={rec.get('expected_vulnerable')}",
+            f"verdict={rec.get('pred_vulnerable')}"]
+    if rec.get("pred_cwe"):
+        meta.append(f"cwe={rec['pred_cwe']}")
+    if rec.get("pred_confidence") is not None:
+        meta.append(f"confidence={rec['pred_confidence']}")
+    if rec.get("pred_function"):
+        meta.append(f"function={rec['pred_function']}")
+    if rec.get("pred_line"):
+        meta.append(f"line={rec['pred_line']}")
+    meta += [f"elapsed={rec.get('elapsed_sec')}s",
+             f"reasoning_tokens={usage.get('reasoning')}",
+             f"output_tokens={usage.get('output')}",
+             f"attempts={rec.get('attempts')}",
+             f"tool_calls={rec.get('tool_calls')}"]
+    body = [head, "", "- " + "\n- ".join(meta), ""]
+    if rec.get("error"):
+        body += [f"**error [{rec.get('error_type')}]**", "",
+                 "```", str(rec["error"]).strip(), "```", ""]
+        if not rec.get("tool_calls"):
+            body += ["submit_verdict was never called: the judge produced no "
+                     "verdict at all, which is a different outcome from a "
+                     "wrong one and is counted separately.", ""]
+    if rec.get("pred_reason"):
+        body += ["**reason**", "", rec["pred_reason"].strip(), ""]
+    if rec.get("response_text"):
+        body += ["**text response (not parsed as a verdict)**", "",
+                 "```", str(rec["response_text"]).strip()[:4000], "```", ""]
+    return "\n".join(body) + "\n"
+
+
 def format_progress(done: int, total: int, case_id: str, rep: int, rec: dict) -> list[str]:
     """One scannable line per evaluation, plus why it came out that way.
 
@@ -289,6 +329,15 @@ def main() -> int:
         }, fh, indent=2)
     print(f"[run] {run_name}: {len(jobs_list)} evaluations to do, jobs={jobs}")
 
+    reasons_path = rec_path.with_name("reasons.md")
+    reasons_path.write_text(
+        f"# {run_name}: judge reasons\n\n"
+        f"model {cfg.get('model')}, thinking {cfg.get('thinking')}, "
+        f"prompt {Path(args.prompt).name}, repeats {repeats}\n\n"
+        "One block per evaluation, written as results come in. The reason text\n"
+        "is kept in full. Full transcripts, including the reasoning traces, are\n"
+        f"under {rec_path.parent / 'raw'} and are not committed.\n\n")
+
     t0 = time.time()
     n_done = 0
     with ThreadPoolExecutor(max_workers=jobs) as ex, rec_path.open("x") as fh:
@@ -298,6 +347,8 @@ def main() -> int:
             rec = fut.result()
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
             fh.flush()
+            with reasons_path.open("a") as rf:
+                rf.write(reason_entry(case["id"], rep, rec))
             n_done += 1
             for line in format_progress(n_done, len(jobs_list), case["id"], rep, rec):
                 print(line)
