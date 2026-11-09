@@ -1,0 +1,6 @@
+{
+  "sample": "cwe22_path",
+  "label": "safe",
+  "transform": "sat3tree_pool1000",
+  "note": "generated 2026-11-09 by archive gen_cases.py (seed 20261109); one shared pool of 440 variables, no block structure. vuln proven by a planted assignment, safe by an unsatisfiable core on 20 shared variables"
+}

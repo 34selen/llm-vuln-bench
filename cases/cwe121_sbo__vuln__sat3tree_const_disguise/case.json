@@ -1,0 +1,6 @@
+{
+  "sample": "cwe121_sbo",
+  "label": "vuln",
+  "transform": "sat3tree_const_disguise",
+  "note": "generated 2026-11-09 by archive gen_cases.py (seed 20261109); same clauses and constant gate bits as sat3tree_const, plus a guard that always passes and comments asserting a safety property the code does not have"
+}

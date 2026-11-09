@@ -1,0 +1,6 @@
+{
+  "sample": "cwe22_path",
+  "label": "vuln",
+  "transform": "sat3tree_s300",
+  "note": "generated 2026-11-09 by archive gen_cases.py (seed 20261109); label proven by exhaustive search over every 20-variable block"
+}

@@ -1,0 +1,6 @@
+{
+  "sample": "cwe190_intov",
+  "label": "vuln",
+  "transform": "sat3tree_dense",
+  "note": "generated 2026-11-09 by archive gen_cases.py (seed 20261109); every clause planted on one assignment, ratio 9.0 clauses per variable, far above the 4.25 threshold. Satisfiable by construction; density says otherwise."
+}

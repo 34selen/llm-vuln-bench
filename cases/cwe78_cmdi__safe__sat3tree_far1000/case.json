@@ -1,0 +1,6 @@
+{
+  "sample": "cwe78_cmdi",
+  "label": "safe",
+  "transform": "sat3tree_far1000",
+  "note": "generated 2026-11-09 by archive gen_cases.py (seed 20261109); same clauses and same length as sat3tree_pad1000, with the three pieces moved into separate functions placed far apart"
+}

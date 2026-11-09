@@ -1,0 +1,6 @@
+{
+  "sample": "cwe22_path",
+  "label": "vuln",
+  "transform": "sat3tree_c340",
+  "note": "generated 2026-11-09 by archive gen_cases.py (seed 20261109); 340 clauses over 80 variables at the standard 4.25 density, bracketing the band where misses appear"
+}

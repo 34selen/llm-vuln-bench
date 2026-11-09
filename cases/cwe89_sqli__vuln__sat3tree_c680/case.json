@@ -1,0 +1,6 @@
+{
+  "sample": "cwe89_sqli",
+  "label": "vuln",
+  "transform": "sat3tree_c680",
+  "note": "generated 2026-11-09 by archive gen_cases.py (seed 20261109); 680 clauses over 160 variables at the standard 4.25 density, bracketing the band where misses appear"
+}

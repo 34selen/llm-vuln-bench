@@ -1,0 +1,6 @@
+{
+  "sample": "cwe121_sbo",
+  "label": "vuln",
+  "transform": "original",
+  "note": "generated 2026-10-07 by the former transforms.py (seed 20261007000)"
+}
