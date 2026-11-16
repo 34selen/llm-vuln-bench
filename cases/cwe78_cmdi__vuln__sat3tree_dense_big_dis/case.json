@@ -1,0 +1,6 @@
+{
+  "sample": "cwe78_cmdi",
+  "label": "vuln",
+  "transform": "sat3tree_dense_big_dis",
+  "note": "generated 2026-11-16 by fu_gen.py (seed 20261116); 1872 clauses over 208 variables, ratio 9.0, every clause planted on one assignment; plus a guard that always passes and comments asserting a safety property the code does not have"
+}

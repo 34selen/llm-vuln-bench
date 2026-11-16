@@ -1,0 +1,6 @@
+{
+  "sample": "cwe89_sqli",
+  "label": "vuln",
+  "transform": "sat3tree_dense_pad",
+  "note": "generated 2026-11-16 by fu_gen.py (seed 20261116); 432 clauses over 48 variables, ratio 9.0, every clause planted on one assignment; padded to 1000 lines"
+}

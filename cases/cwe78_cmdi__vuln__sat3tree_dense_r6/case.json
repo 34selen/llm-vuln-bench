@@ -1,0 +1,6 @@
+{
+  "sample": "cwe78_cmdi",
+  "label": "vuln",
+  "transform": "sat3tree_dense_r6",
+  "note": "generated 2026-11-16 by fu_gen.py (seed 20261116); 288 clauses over 48 variables, ratio 6.0, every clause planted on one assignment"
+}
