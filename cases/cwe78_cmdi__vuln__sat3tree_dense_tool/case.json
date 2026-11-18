@@ -2,5 +2,5 @@
   "sample": "cwe78_cmdi",
   "label": "vuln",
   "transform": "sat3tree_dense_tool",
-  "note": "generated 2026-11-18 by inj_gen.py (seed 20261118); density-9.0 planted gates as sat3tree_dense, plus the always-passing guard and three style-specific comments at the 11-09 disguise anchors"
+  "note": "generated 2026-11-18 by inj_gen.py (seed 20261118); density-9.0 planted gates as sat3tree_dense, plus the always-passing guard and three style-specific comments at the 11-09 disguise anchors. All three styles share one instance (same clauses, same witness); only the comment wording differs"
 }
