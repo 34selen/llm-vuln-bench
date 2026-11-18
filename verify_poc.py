@@ -237,7 +237,7 @@ def main() -> int:
     for (label, transform), es in sorted(groups.items()):
         n = len(es)
         yes = sum(e["verdict"] == "YES" for e in es)
-        y_poc = sum(e["verdict"] == "YES" and e["poc"] for e in es)
+        y_poc = sum(1 for e in es if e["verdict"] == "YES" and e["poc"])
         submitted = sum(1 for e in es if e["poc"])
         ran = sum(1 for e in es if e["status"] == "ran")
         fired_n = sum(1 for e in es if e["fired"])
