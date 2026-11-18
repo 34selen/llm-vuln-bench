@@ -1,0 +1,6 @@
+{
+  "sample": "cwe89_sqli",
+  "label": "vuln",
+  "transform": "sat3tree_dense_b6",
+  "note": "generated 2026-11-18 by map_gen.py (seed 20261118); 864 clauses over 96 variables at ratio 9.0, every clause planted on one assignment -- one cell of the clauses x density miss map"
+}

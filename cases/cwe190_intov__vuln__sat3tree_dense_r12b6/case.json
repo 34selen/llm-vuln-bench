@@ -1,0 +1,6 @@
+{
+  "sample": "cwe190_intov",
+  "label": "vuln",
+  "transform": "sat3tree_dense_r12b6",
+  "note": "generated 2026-11-18 by map_gen.py (seed 20261118); 1152 clauses over 96 variables at ratio 12.0, every clause planted on one assignment -- one cell of the clauses x density miss map"
+}

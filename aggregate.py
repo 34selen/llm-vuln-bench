@@ -20,7 +20,10 @@ ORDER = ["original", "algebraic", "sat3", "smt", "combo",
          "sat3tree_dense_r12", "sat3tree_dense_hi", "sat3tree_dense_r24",
          "sat3tree_dense_r36", "sat3tree_dense_dis", "sat3tree_dense_pad",
          "sat3tree_dense_dis_pad", "sat3tree_dense_hi_dis",
-         "sat3tree_dense_big", "sat3tree_dense_big_dis"]
+         "sat3tree_dense_big", "sat3tree_dense_big_dis",
+         "sat3tree_dense_r75", "sat3tree_dense_r105",
+         "sat3tree_dense_r6b6", "sat3tree_dense_b6", "sat3tree_dense_r12b6",
+         "sat3tree_dense_b9"]
 
 
 def pct(n: int, d: int) -> str:
