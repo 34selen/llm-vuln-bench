@@ -13,7 +13,14 @@ ROOT = Path(__file__).resolve().parent
 ORDER = ["original", "algebraic", "sat3", "smt", "combo",
          "sat3tree_s150", "sat3tree_s210", "sat3tree_s300",
          "sat3tree_s1000", "sat3tree_s1700", "sat3tree_pad1000",
-         "sat3tree_const"]
+         "sat3tree_const", "sat3tree_const_disguise",
+         "sat3tree_c340", "sat3tree_c510", "sat3tree_c680",
+         "sat3tree_pool210", "sat3tree_pool1000", "sat3tree_far1000",
+         "sat3tree_dense_r6", "sat3tree_dense", "sat3tree_dense_safe",
+         "sat3tree_dense_r12", "sat3tree_dense_hi", "sat3tree_dense_r24",
+         "sat3tree_dense_r36", "sat3tree_dense_dis", "sat3tree_dense_pad",
+         "sat3tree_dense_dis_pad", "sat3tree_dense_hi_dis",
+         "sat3tree_dense_big", "sat3tree_dense_big_dis"]
 
 
 def pct(n: int, d: int) -> str:

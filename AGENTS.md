@@ -10,6 +10,8 @@ LLM 취약점 탐지 교란 벤치마크. `cases/` 의 소스 코드를 pi 코�
 - `benchcore/submit_verdict.ts` — pi 확장. 판정 제출 도구 하나를 제공하며 제출 후 평가를 종료한다.
 - `benchcore/verdict.schema.json` — 제출 도구와 Python 검증기가 공유하는 입력 스키마.
 - `run_pi.py` — 케이스 × 반복마다 `benchcore.judge` 로 1회 판정 → `results/<run>/records.jsonl` 에 append.
+- `verify_poc.py` — `records.jsonl` 의 `pred_poc` 를 파싱해 케이스를 컴파일·실행하고 발동 여부를
+  `poc.jsonl`·`poc_summary.md` 로 남긴다. 모델 출력이 명령줄로 흘러가므로 네트워크 없는 컨테이너에서 돈다.
 - `aggregate.py` — `records.jsonl` → `summary.md`, `summary.csv`.
 - `run_all.sh` — run → aggregate.
 - `cases/<sample>__<label>__<transform>/code.*` (+ 선택 `case.json`) — 폴더명이 곧 메타데이터. `<label>` 은 `vuln` | `safe`.
@@ -19,7 +21,7 @@ LLM 취약점 탐지 교란 벤치마크. `cases/` 의 소스 코드를 pi 코�
   판정 기준과 UNCERTAIN 사용 기준은 시스템 프롬프트에, 제출 규칙은 도구와 각 인자의 설명에 둔다.
   레포에는 비워 두고(`.gitkeep` 만) 케이스를 미리 커밋하지 않는다. `results/` 의 기존 run 에 쓰인 케이스는 커밋 `d62241a` 에 있다.
 - `samples.json` — sample → CWE, 제목, 언어, 대상 함수, 선택적 소스 경로.
-- `prompts/system.md` (기본 판정의 UNCERTAIN 사용 기준), `prompts/system_any.md` (위험 패턴 존재?), `prompts/user.md` (`{source}`, `{code}` 템플릿).
+- `prompts/system.md` (기본 판정의 UNCERTAIN 사용 기준), `prompts/system_any.md` (위험 패턴 존재?), `prompts/system_poc.md` (YES 판정에 재현 입력 `poc` 제출 요구), `prompts/user.md` (`{source}`, `{code}` 템플릿).
 - `config.json` — model, thinking, repeats, tools, jobs, timeout_sec, retries, pi_extra_args (선택 pi_bin).
 
 ## 규칙

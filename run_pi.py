@@ -197,6 +197,8 @@ def reason_entry(case_id: str, rep: int, rec: dict) -> str:
                      "wrong one and is counted separately.", ""]
     if rec.get("pred_reason"):
         body += ["**reason**", "", rec["pred_reason"].strip(), ""]
+    if rec.get("pred_poc"):
+        body += ["**poc**", "", "```", str(rec["pred_poc"]).strip()[:1000], "```", ""]
     if rec.get("response_text"):
         body += ["**text response (not parsed as a verdict)**", "",
                  "```", str(rec["response_text"]).strip()[:4000], "```", ""]
@@ -220,6 +222,8 @@ def format_progress(done: int, total: int, case_id: str, rep: int, rec: dict) ->
         bits.append(f"{rec['attempts']} attempts")
     if rec.get("invalid_tool_calls"):
         bits.append(f"{rec['invalid_tool_calls']} invalid submissions")
+    if rec.get("pred_poc"):
+        bits.append(f"poc[{len(rec['pred_poc'])}]")
 
     if rec.get("error"):
         head = (f"[run] ERR {done}/{total} {case_id} r{rep} -> no verdict "
@@ -253,6 +257,7 @@ def main() -> int:
     ap.add_argument("--repeats", type=int, default=None)
     ap.add_argument("--jobs", type=int, default=None)
     ap.add_argument("--filter", default="", help="only cases whose id contains this string")
+    ap.add_argument("--transform", default="", help="comma-separated exact transform names (a substring --filter cannot pick one name out of names that extend it)")
     ap.add_argument("--limit", type=int, default=0, help="stop after N (case,repeat) pairs")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--mock", action="store_true", help="do not call pi; fabricate verdicts to test the pipeline")
@@ -293,7 +298,10 @@ def main() -> int:
     except (OSError, ValueError) as e:
         print(f"cannot load cases: {e}", file=sys.stderr)
         return 1
-    jobs_list = [(case, rep) for case in index if not args.filter or args.filter in case["id"]
+    transforms = {t.strip() for t in args.transform.split(",") if t.strip()} or None
+    jobs_list = [(case, rep) for case in index
+                 if (not args.filter or args.filter in case["id"])
+                 and (transforms is None or case["transform"] in transforms)
                  for rep in range(repeats)]
     if args.limit:
         jobs_list = jobs_list[: args.limit]

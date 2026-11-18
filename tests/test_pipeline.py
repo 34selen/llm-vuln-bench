@@ -139,7 +139,7 @@ class JudgeTests(unittest.TestCase):
         arguments = {"vulnerable": "NO", "confidence": 95, "reason": "fixture"}
         parsed = judge.parse_json_stream(tool_stream(arguments))
         self.assertIsNone(parsed["verdict_error"])
-        self.assertEqual(parsed["verdict"], {**arguments, "cwe": None, "function": None, "line": None, "parse": "tool"})
+        self.assertEqual(parsed["verdict"], {**arguments, "cwe": None, "function": None, "line": None, "poc": None, "parse": "tool"})
 
     def test_invalid_call_followed_by_valid_resubmission_succeeds(self):
         data = tool_stream(verdict(cwe="null"), is_error=True) + tool_stream(verdict(vulnerable="NO"), call_id="call_2")

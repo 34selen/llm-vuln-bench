@@ -8,6 +8,7 @@
     "function": { "type": "string", "minLength": 1, "description": "Vulnerable function name; omit this field when not applicable" },
     "line": { "type": "integer", "minimum": 1, "description": "1-based vulnerable statement line; omit this field when not applicable" },
     "confidence": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Confidence from 0 to 100" },
-    "reason": { "type": "string", "minLength": 1, "description": "One or two sentences explaining the verdict" }
+    "reason": { "type": "string", "minLength": 1, "description": "One or two sentences explaining the verdict" },
+    "poc": { "type": "string", "minLength": 1, "description": "Proof of concept: the concrete command-line arguments that make the program exhibit the vulnerability when it is run, as one shell-style argument string (exactly what would follow the program name). Submit this field if and only if your verdict is YES. The arguments must actually trigger the vulnerable behaviour, not merely reach it; omit the field when your verdict is NO or UNCERTAIN" }
   }
 }

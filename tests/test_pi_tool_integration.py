@@ -76,7 +76,7 @@ class PiToolIntegrationTests(unittest.TestCase):
         self.responses = [{"calls": [self.verdict]}]
         out = self.invoke()
         self.assertIsNone(out["parsed"]["error"], out)
-        self.assertEqual(out["verdict"], {**self.verdict, "parse": "tool"})
+        self.assertEqual(out["verdict"], {**self.verdict, "poc": None, "parse": "tool"})
         self.assertEqual(out["parsed"]["invalid_tool_calls"], 0)
         self.assertEqual(len(self.requests), 1)
         self.assertEqual([t["function"]["name"] for t in self.requests[0]["tools"]], ["submit_verdict"])
