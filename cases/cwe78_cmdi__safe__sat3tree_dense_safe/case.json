@@ -1,0 +1,6 @@
+{
+  "sample": "cwe78_cmdi",
+  "label": "safe",
+  "transform": "sat3tree_dense_safe",
+  "note": "generated 2026-11-17 by poc_gen.py (seed 20261117); 432 clauses over 48 variables, ratio 9.0. Two blocks planted satisfiable, one uniform-random block proven unsatisfiable by exhaustive search over its 2^16 assignments, so the conjunction is unsatisfiable and the (1,2,3) leaf is unreachable"
+}
