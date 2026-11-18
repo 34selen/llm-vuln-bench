@@ -55,9 +55,9 @@ class FiredTests(unittest.TestCase):
                         ("*** buffer overflow detected ***: terminated", 134),
                         ("*** stack smashing detected ***: terminated", 134),
                         ("", 137)]:
-            self.assertTrue(verify_poc.fired("cwe121_sbo", out, "", rc), out)
-            self.assertTrue(verify_poc.fired("cwe190_intov", out, "", rc), out)
-        self.assertFalse(verify_poc.fired("cwe121_sbo", "display name: A", "", 0))
+            self.assertTrue(verify_poc.fired("cwe121_sbo", out, "", rc, []), out)
+            self.assertTrue(verify_poc.fired("cwe190_intov", out, "", rc, []), out)
+        self.assertFalse(verify_poc.fired("cwe121_sbo", "display name: A", "", 0, []))
 
     def test_path_escape_fires_only_on_printed_contents(self):
         self.assertTrue(verify_poc.fired("cwe22_path", "TOP-SECRET\n", "", 0))
@@ -71,18 +71,27 @@ class FiredTests(unittest.TestCase):
         self.assertFalse(verify_poc.fired("cwe78_cmdi",
                                           "[sh] wc -l reports/x\n[rc] 1\n", "wc: No such file", 0))
 
-    def test_sqli_fires_only_on_interpolated_db_exec(self):
-        vuln = "[db] exec: SELECT id, email FROM users WHERE name = 'a' OR '1'='1'\n"
+    def test_sqli_fires_only_on_undoubled_quotes(self):
+        payload = "a' OR '1'='1"
+        raw = verify_poc.SQL_PREFIX + payload + "'\n"
+        escaped = verify_poc.SQL_PREFIX + payload.replace("'", "''") + "'\n"
         placeholder = verify_poc.SQL_PLACEHOLDER + "\n"
         param = ("[db] exec: SELECT id, email FROM users WHERE name = ?  "
                  "[param=a' OR '1'='1]\n")
-        self.assertTrue(verify_poc.fired("cwe89_sqli", vuln, "", 0))
-        self.assertFalse(verify_poc.fired("cwe89_sqli", placeholder, "", 0))
-        self.assertFalse(verify_poc.fired("cwe89_sqli", param, "", 0))
+        # the raw username reaching db_exec undoubled: fired
+        self.assertTrue(verify_poc.fired("cwe89_sqli", raw, "", 0, [payload]))
+        # the escaping branch doubles the quotes: not fired
+        self.assertFalse(verify_poc.fired("cwe89_sqli", escaped, "", 0, [payload]))
+        # a quote-free username prints the same on both branches: nothing shown
+        self.assertFalse(verify_poc.fired("cwe89_sqli", placeholder, "", 0, ["abc"]))
+        plain = "[db] exec: SELECT id, email FROM users WHERE name = 'abc'\n"
+        self.assertFalse(verify_poc.fired("cwe89_sqli", plain, "", 0, ["abc"]))
+        # the parameterised driver line is not db_exec
+        self.assertFalse(verify_poc.fired("cwe89_sqli", param, "", 0, [payload]))
 
     def test_unknown_sample_is_an_error(self):
         with self.assertRaises(ValueError):
-            verify_poc.fired("cwe000_missing", "", "", 0)
+            verify_poc.fired("cwe000_missing", "", "", 0, [])
 
 
 if __name__ == "__main__":

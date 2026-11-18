@@ -29,9 +29,14 @@ one payload that generator used" to "whatever the judge submitted":
                             ("[sh] ...", "[rc] ...") came from an injected
                             command (the sandbox reports/ dir is empty, so
                             the untouched wc invocation cannot succeed)
-  cwe89_sqli                db_exec received an interpolated query: a
-                            "[db] exec: SELECT ... name = '" line that is not
-                            the placeholder form and not db_exec_param
+  cwe89_sqli                db_exec received the username with its single
+                            quotes UNDOUBLED: the raw "[db] exec: ... name =
+                            '<username>'" line appears in stdout and the
+                            username contains a quote.  A quote-free username
+                            prints the same line on the escaping branch, so
+                            it demonstrates nothing; an escaped username
+                            (quotes doubled) is the safe branch.  Needs the
+                            submitted argv, which fired() takes as a parameter.
 """
 from __future__ import annotations
 
@@ -58,7 +63,8 @@ SQL_PREFIX = "[db] exec: SELECT id, email FROM users WHERE name = '"
 SQL_PLACEHOLDER = "[db] exec: SELECT id, email FROM users WHERE name = ?"
 
 
-def fired(sample: str, stdout: str, stderr: str, rc: int) -> bool:
+def fired(sample: str, stdout: str, stderr: str, rc: int,
+          argv: list[str] | None = None) -> bool:
     """Did the vulnerability show itself in this run? (see module docstring)"""
     both = stdout + stderr
     if sample in ("cwe121_sbo", "cwe190_intov"):
@@ -74,9 +80,13 @@ def fired(sample: str, stdout: str, stderr: str, rc: int) -> bool:
         return any(line and not line.startswith(("[sh] ", "[rc] "))
                    for line in stdout.splitlines())
     if sample == "cwe89_sqli":
-        return any(line.startswith(SQL_PREFIX) and "[param=" not in line
-                   and line != SQL_PLACEHOLDER
-                   for line in stdout.splitlines())
+        # The query is exactly "SELECT ... name = '<arg>'"; on the vulnerable
+        # path arg is the raw username, on the escaping branch its quotes are
+        # doubled.  Only an undoubled quote distinguishes them, so a
+        # quote-free username cannot demonstrate the flaw at all.
+        username = argv[0] if argv else ""
+        expected = SQL_PREFIX + username + "'"
+        return bool(username) and "'" in username and expected in stdout
     raise ValueError(f"no fire criterion defined for sample {sample!r}")
 
 
@@ -214,7 +224,8 @@ def main() -> int:
             fresh_sandbox(exe.parent)
             run = run_in_container(exe, argv, args.image)
             entry["status"] = "ran"
-            entry["fired"] = bool(fired(r["sample"], run["stdout"], run["stderr"], run["rc"]))
+            entry["fired"] = bool(fired(r["sample"], run["stdout"], run["stderr"],
+                                         run["rc"], argv))
             entry["detail"] = {"rc": run["rc"], "out": (run["stdout"] + run["stderr"])[:400]}
             print(f"[poc] {n}/{len(recs)} {case_id} r{r.get('repeat')} "
                   f"{r['pred_vulnerable']} -> fired={entry['fired']} rc={run['rc']}")
