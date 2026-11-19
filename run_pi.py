@@ -127,9 +127,12 @@ def evaluate(case: dict, rep: int, cfg: dict, args, raw_dir: Path) -> dict:
     try:
         code = (Path(args.cases) / case["id"] / case["source"]).read_text()
         env_extra = None
-        if CHECK_ENV in os.environ:
+        if CHECK_ENV in os.environ and judge.CHECK_TOOL in jd["tools"]:
             # the verification-loop condition: hand the judge the case's gate
-            # clauses through a per-case file so check_assignment can evaluate
+            # clauses through a per-case file so check_assignment can evaluate.
+            # Gated on the tool list too, not just the env var, so a control
+            # run in a shell that still exports BENCH_GATE_DIR cannot be
+            # quietly contaminated with the checker.
             from benchcore import gates as gates_mod
             gpath = Path(os.environ[CHECK_ENV]) / f"{case['id']}.json"
             gates_mod.write_gate_file(code, gpath)
