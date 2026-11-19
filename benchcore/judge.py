@@ -17,15 +17,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 USER_TPL = ROOT / "prompts" / "user.md"
 VERDICT_TOOL = "submit_verdict"
+CHECK_TOOL = "check_assignment"
+ALL_TOOLS = [VERDICT_TOOL, CHECK_TOOL]
 VERDICT_EXTENSION = Path(__file__).with_name("submit_verdict.ts")
 VERDICT_SCHEMA = json.loads(Path(__file__).with_name("verdict.schema.json").read_text())
 
 
 def effective_tools(requested: list[str] | None = None) -> list[str]:
-    """Keep the evaluation tool set limited to verdict submission."""
-    if requested is not None and requested != [VERDICT_TOOL]:
-        raise ValueError("only the submit_verdict tool is allowed")
-    return [VERDICT_TOOL]
+    """Keep the evaluation tool set limited to verdict submission, optionally
+    with the mechanical gate checker (used by the verification-loop record)."""
+    if requested is None:
+        return [VERDICT_TOOL]
+    allowed = [
+        [VERDICT_TOOL],
+        [VERDICT_TOOL, CHECK_TOOL],
+    ]
+    if requested not in allowed:
+        raise ValueError(f"allowed tool sets: {allowed}")
+    return list(requested)
 
 
 def build_pi_cmd(judge: dict, prompt: str, pi_bin: str = "pi", extra_args: list[str] | None = None) -> list[str]:
@@ -107,7 +116,7 @@ def parse_json_stream(stdout: str) -> dict:
     error = None
     verdict_error = None
     invalid_error = None
-    tool_calls = invalid_calls = 0
+    tool_calls = invalid_calls = check_calls = 0
     for line in stdout.split("\n"):
         try:
             ev = json.loads(line.strip("\r"))
@@ -136,12 +145,17 @@ def parse_json_stream(stdout: str) -> dict:
         elif t == "tool_execution_start":
             tool_calls += 1
             call_id = ev.get("toolCallId")
-            if ev.get("toolName") != VERDICT_TOOL or not call_id or call_id in starts:
+            name = ev.get("toolName")
+            if name == CHECK_TOOL:
+                check_calls += 1          # legitimate pre-verdict verification
+            elif name != VERDICT_TOOL or not call_id or call_id in starts:
                 verdict_error = "unexpected or duplicate tool call"
             else:
                 starts[call_id] = ev.get("args")
         elif t == "tool_execution_end":
             call_id = ev.get("toolCallId")
+            if ev.get("toolName") == CHECK_TOOL:
+                continue                  # result content is not a verdict
             if ev.get("toolName") != VERDICT_TOOL or call_id not in starts:
                 verdict_error = "unmatched submit_verdict result"
                 continue
@@ -173,7 +187,8 @@ def parse_json_stream(stdout: str) -> dict:
     usage = sum_usage(usages)
     return {
         "text": "\n".join(text_parts).strip(), "thinking": "\n".join(thinking_parts).strip(),
-        "usage": usage, "tool_calls": tool_calls, "invalid_tool_calls": invalid_calls, "error": error,
+        "usage": usage, "tool_calls": tool_calls, "invalid_tool_calls": invalid_calls,
+        "check_calls": check_calls, "error": error,
         "verdict": submissions[0] if not verdict_error else empty_verdict(),
         "verdict_error": verdict_error,
     }
@@ -202,7 +217,8 @@ def render_prompt(code: str, source: str) -> str:
 
 def run(code: str, judge: dict, *, source: str = "code.c",
         timeout: int = 900, retries: int = 2, pi_bin: str = "pi",
-        extra_args: list[str] | None = None, raw_path: Path | None = None) -> dict:
+        extra_args: list[str] | None = None, raw_path: Path | None = None,
+        env_extra: dict | None = None) -> dict:
     """Judge one file.  Returns {"parsed": ..., "verdict": ..., "rc": ..., "stderr": ...}.
 
     pi runs in an empty temporary directory so that a judge with file tools enabled cannot
@@ -220,7 +236,10 @@ def run(code: str, judge: dict, *, source: str = "code.c",
         execution_type = None
         with tempfile.TemporaryDirectory(prefix="bench-judge-") as cwd:
             try:
-                r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=os.environ.copy())
+                env = os.environ.copy()
+                if env_extra:
+                    env.update(env_extra)
+                r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
                 rc, stderr = r.returncode, r.stderr
                 stdout = r.stdout
                 if rc != 0:

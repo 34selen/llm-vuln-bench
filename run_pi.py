@@ -24,6 +24,7 @@ from pathlib import Path
 from benchcore import judge
 
 ROOT = Path(__file__).resolve().parent
+CHECK_ENV = "BENCH_GATE_DIR"   # set to a dir to enable check_assignment
 
 
 def load_cases(cases_dir: Path) -> list[dict]:
@@ -125,6 +126,14 @@ def evaluate(case: dict, rep: int, cfg: dict, args, raw_dir: Path) -> dict:
     }
     try:
         code = (Path(args.cases) / case["id"] / case["source"]).read_text()
+        env_extra = None
+        if CHECK_ENV in os.environ:
+            # the verification-loop condition: hand the judge the case's gate
+            # clauses through a per-case file so check_assignment can evaluate
+            from benchcore import gates as gates_mod
+            gpath = Path(os.environ[CHECK_ENV]) / f"{case['id']}.json"
+            gates_mod.write_gate_file(code, gpath)
+            env_extra = {"BENCH_GATE_FILE": str(gpath)}
         if args.mock:
             parsed = judge.mock_verdict(f"{case['id']}/{rep}", case["cwe"], case["function"])
             rc, stderr = 0, ""
@@ -133,7 +142,8 @@ def evaluate(case: dict, rep: int, cfg: dict, args, raw_dir: Path) -> dict:
             out = judge.run(code, jd, source=case["source"],
                             timeout=cfg.get("timeout_sec", 300), retries=cfg.get("retries", 2),
                             pi_bin=cfg.get("pi_bin", "pi"), extra_args=cfg.get("pi_extra_args"),
-                            raw_path=raw_dir / f"{case['id']}__r{rep}.jsonl")
+                            raw_path=raw_dir / f"{case['id']}__r{rep}.jsonl",
+                            env_extra=env_extra)
             parsed, rc, stderr = out["parsed"], out["rc"], out["stderr"]
             verdict = out["verdict"]
     except Exception as e:  # keep failed evaluations in the experiment's denominator
@@ -150,6 +160,7 @@ def evaluate(case: dict, rep: int, cfg: dict, args, raw_dir: Path) -> dict:
         "usage": parsed.get("usage"),
         "attempts": parsed.get("attempts"),
         "tool_calls": parsed.get("tool_calls"),
+        "check_calls": parsed.get("check_calls"),
         "invalid_tool_calls": parsed.get("invalid_tool_calls"),
         "tool_arguments": {k: verdict[k] for k in judge.VERDICT_SCHEMA["properties"]} if verdict["vulnerable"] else None,
         "response_text": parsed.get("text"),
