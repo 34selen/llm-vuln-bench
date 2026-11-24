@@ -7,7 +7,8 @@ record the verdicts.
   python3 run_pi.py --mock            # pipeline smoke test without an API key
 
 Each (case, repeat) becomes one line in results/<run>/records.jsonl.  Raw
-pi output is kept in results/<run>/raw/.  Each run name can be used only once.
+pi output is kept in results/<run>/raw/.  A run name is used once, except with
+--resume, which continues that same run where it stopped.
 """
 from __future__ import annotations
 
@@ -259,6 +260,82 @@ def format_progress(done: int, total: int, case_id: str, rep: int, rec: dict) ->
     return [head, f"      why: {reason[:220]}{'...' if len(reason) > 220 else ''}"]
 
 
+MEASUREMENT_FIELDS = ("model", "thinking", "tools", "response_mode", "repeats",
+                      "system_prompt", "mock")
+
+
+def recorded_pairs(rec_path: Path) -> set[tuple[str, int]]:
+    """(case_id, repeat) of every evaluation already in records.jsonl.
+
+    A pair counts as done whether it succeeded or errored.  Re-running an
+    errored pair would hand it a retry that an uninterrupted run never gets,
+    which changes the cell: resuming continues a run, it does not improve it.
+    """
+    done: set[tuple[str, int]] = set()
+    if not rec_path.exists():
+        return done
+    lines = rec_path.read_text().splitlines()
+    for n, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            if n == len(lines):
+                # A kill mid-write leaves the last line torn.  That pair is simply
+                # not done, so it re-runs; a torn line earlier means a damaged file.
+                print(f"[run] {rec_path.name} line {n} is incomplete; that evaluation will re-run",
+                      file=sys.stderr)
+                continue
+            raise ValueError(f"{rec_path} line {n} is not valid JSON")
+        case_id, rep_i = rec.get("case_id"), rec.get("repeat")
+        if not isinstance(case_id, str) or not isinstance(rep_i, int):
+            raise ValueError(f"{rec_path} line {n} has no case_id/repeat to resume from")
+        done.add((case_id, rep_i))
+    return done
+
+
+def trim_torn_tail(rec_path: Path) -> int:
+    """Drop an incomplete final line so an append cannot fuse onto it.
+
+    A process killed mid-write leaves records.jsonl without its closing newline.
+    Appending then glues the next record onto that fragment and both become
+    unreadable, so the resumed evaluation is lost too -- and the damaged line is
+    no longer last, which blocks every later resume.  The fragment holds no
+    complete record, so it is dropped rather than kept.  This is the one place
+    that rewrites records.jsonl, and it removes bytes that are not a record.
+    """
+    if not rec_path.exists():
+        return 0
+    data = rec_path.read_bytes()
+    if not data or data.endswith(b"\n"):
+        return 0
+    cut = data.rfind(b"\n") + 1          # 0 when the whole file is one torn line
+    with rec_path.open("r+b") as fh:
+        fh.truncate(cut)
+    return len(data) - cut
+
+
+def measurement_mismatch(cfg_path: Path, run_cfg: dict) -> list[tuple[str, object, object]] | None:
+    """Fields that decide what is asked and differ from the run being resumed.
+
+    None when run_config.json cannot be read.  `jobs`, `retries` and `timeout_sec`
+    are not compared: they change how the calls are issued, not what is asked.
+    """
+    try:
+        old = json.loads(cfg_path.read_text())
+    except (OSError, ValueError):
+        return None
+    return [(f, old.get(f), run_cfg[f]) for f in MEASUREMENT_FIELDS if old.get(f) != run_cfg[f]]
+
+
+def record_resume(cfg_path: Path, started: str) -> None:
+    """Keep every resume in run_config.json: a record has to show the gap."""
+    old = json.loads(cfg_path.read_text())
+    old.setdefault("resumed", []).append(started)
+    cfg_path.write_text(json.dumps(old, indent=2))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(ROOT / "config.json"))
@@ -272,7 +349,10 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=None)
     ap.add_argument("--filter", default="", help="only cases whose id contains this string")
     ap.add_argument("--transform", default="", help="comma-separated exact transform names (a substring --filter cannot pick one name out of names that extend it)")
-    ap.add_argument("--limit", type=int, default=0, help="stop after N (case,repeat) pairs")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="stop after N (case,repeat) pairs; with --resume, N more")
+    ap.add_argument("--resume", action="store_true",
+                    help="continue the existing --run-name: skip pairs already in its records.jsonl")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--mock", action="store_true", help="do not call pi; fabricate verdicts to test the pipeline")
     mode.add_argument("--dry-run", action="store_true", help="print the pi command for the first case without creating a run")
@@ -293,14 +373,23 @@ def main() -> int:
     jobs = args.jobs if args.jobs is not None else cfg.get("jobs", 1)
     if repeats < 1 or jobs < 1 or args.limit < 0 or cfg.get("retries", 2) < 0:
         ap.error("repeats and jobs must be positive; limit and retries must be nonnegative")
+    if args.resume and not args.run_name:
+        ap.error("--resume needs the --run-name of the run to continue")
+    if args.resume and args.dry_run:
+        ap.error("--dry-run creates no run, so there is nothing to resume")
     model = args.model or cfg["model"]
 
     run_name = args.run_name or (("mock_" if args.mock else "") + model.replace("/", "_") + datetime.now().strftime("_%Y%m%d_%H%M%S_%f"))
     if not run_name or run_name in (".", "..") or Path(run_name).name != run_name:
         ap.error("run-name must be a single directory name")
     run_dir = ROOT / "results" / run_name
-    if run_dir.exists() or run_dir.is_symlink():
-        print(f"run already exists: {run_dir}; choose a new --run-name", file=sys.stderr)
+    rec_path = run_dir / "records.jsonl"
+    if run_dir.is_symlink() or (run_dir.exists() and not args.resume):
+        print(f"run already exists: {run_dir}; choose a new --run-name, or --resume to continue it",
+              file=sys.stderr)
+        return 1
+    if args.resume and not run_dir.is_dir():
+        print(f"no run to resume at {run_dir}", file=sys.stderr)
         return 1
 
     if not args.mock and not args.dry_run and not os.environ.get("ZAI_API_KEY") and model.startswith("zai/"):
@@ -317,6 +406,19 @@ def main() -> int:
                  if (not args.filter or args.filter in case["id"])
                  and (transforms is None or case["transform"] in transforms)
                  for rep in range(repeats)]
+    if args.resume:
+        try:
+            done = recorded_pairs(rec_path)
+        except (OSError, ValueError) as e:
+            print(f"cannot resume: {e}", file=sys.stderr)
+            return 1
+        planned = len(jobs_list)
+        jobs_list = [(c, r) for c, r in jobs_list if (c["id"], r) not in done]
+        print(f"[run] resume {run_name}: {planned - len(jobs_list)}/{planned} already recorded, "
+              f"{len(jobs_list)} left")
+        if not jobs_list:
+            print("[run] nothing left to do")
+            return 0
     if args.limit:
         jobs_list = jobs_list[: args.limit]
     if args.dry_run:
@@ -334,35 +436,63 @@ def main() -> int:
         return 1
 
     run_dir.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        run_dir.mkdir()  # atomic reservation: concurrent runs cannot share a name
-    except FileExistsError:
-        print(f"run already exists: {run_dir}; choose a new --run-name", file=sys.stderr)
-        return 1
+    if not args.resume:
+        try:
+            run_dir.mkdir()  # atomic reservation: concurrent runs cannot share a name
+        except FileExistsError:
+            print(f"run already exists: {run_dir}; choose a new --run-name", file=sys.stderr)
+            return 1
     raw_dir = run_dir / "raw"
-    raw_dir.mkdir()
-    rec_path = run_dir / "records.jsonl"
-    with (run_dir / "run_config.json").open("x") as fh:
-        json.dump({
-            "config": cfg, "model": model, "thinking": args.thinking or cfg.get("thinking"),
-            "tools": args.tools, "response_mode": "tool", "repeats": repeats,
-            "system_prompt": str(args.prompt.relative_to(ROOT)) if args.prompt.is_relative_to(ROOT) else str(args.prompt),
-            "mock": args.mock, "started": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }, fh, indent=2)
+    raw_dir.mkdir(exist_ok=args.resume)
+    run_cfg = {
+        "config": cfg, "model": model, "thinking": args.thinking or cfg.get("thinking"),
+        "tools": args.tools, "response_mode": "tool", "repeats": repeats,
+        "system_prompt": str(args.prompt.relative_to(ROOT)) if args.prompt.is_relative_to(ROOT) else str(args.prompt),
+        "mock": args.mock, "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    cfg_path = run_dir / "run_config.json"
+    if args.resume:
+        differs = measurement_mismatch(cfg_path, run_cfg)
+        if differs is None:
+            print(f"cannot read {cfg_path}; refusing to resume", file=sys.stderr)
+            return 1
+        if differs:
+            print("refusing to resume: these decide what is asked and changed since the run started:",
+                  file=sys.stderr)
+            for field, was, now in differs:
+                print(f"  {field}: the run has {was!r}, this invocation has {now!r}", file=sys.stderr)
+            print("use a new --run-name; mixing them inside one run mixes conditions.", file=sys.stderr)
+            return 1
+        record_resume(cfg_path, run_cfg["started"])
+    else:
+        with cfg_path.open("x") as fh:
+            json.dump(run_cfg, fh, indent=2)
     print(f"[run] {run_name}: {len(jobs_list)} evaluations to do, jobs={jobs}")
 
     reasons_path = rec_path.with_name("reasons.md")
-    reasons_path.write_text(
-        f"# {run_name}: judge reasons\n\n"
-        f"model {cfg.get('model')}, thinking {cfg.get('thinking')}, "
-        f"prompt {Path(args.prompt).name}, repeats {repeats}\n\n"
-        "One block per evaluation, written as results come in. The reason text\n"
-        "is kept in full. Full transcripts, including the reasoning traces, are\n"
-        f"under {rec_path.parent / 'raw'} and are not committed.\n\n")
+    if args.resume:
+        with reasons_path.open("a") as rf:
+            rf.write(f"\n## resumed {run_cfg['started']}\n\n"
+                     f"{len(jobs_list)} evaluations were still to do at this point.\n\n")
+    else:
+        reasons_path.write_text(
+            f"# {run_name}: judge reasons\n\n"
+            f"model {cfg.get('model')}, thinking {cfg.get('thinking')}, "
+            f"prompt {Path(args.prompt).name}, repeats {repeats}\n\n"
+            "One block per evaluation, written as results come in. The reason text\n"
+            "is kept in full. Full transcripts, including the reasoning traces, are\n"
+            f"under {rec_path.parent / 'raw'} and are not committed.\n\n")
+
+    if args.resume:
+        dropped = trim_torn_tail(rec_path)
+        if dropped:
+            print(f"[run] dropped {dropped} incomplete bytes from the end of {rec_path.name}: "
+                  "a kill mid-write leaves no newline, and appending onto it would lose "
+                  "the next record too", file=sys.stderr)
 
     t0 = time.time()
     n_done = 0
-    with ThreadPoolExecutor(max_workers=jobs) as ex, rec_path.open("x") as fh:
+    with ThreadPoolExecutor(max_workers=jobs) as ex, rec_path.open("a" if args.resume else "x") as fh:
         futs = {ex.submit(evaluate, c, r, cfg, args, raw_dir): (c, r) for c, r in jobs_list}
         for fut in as_completed(futs):
             case, rep = futs[fut]

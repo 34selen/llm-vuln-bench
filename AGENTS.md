@@ -10,6 +10,7 @@ LLM 취약점 탐지 교란 벤치마크. `cases/` 의 소스 코드를 pi 코�
 - `benchcore/submit_verdict.ts` — pi 확장. 판정 제출 도구 하나를 제공하며 제출 후 평가를 종료한다.
 - `benchcore/verdict.schema.json` — 제출 도구와 Python 검증기가 공유하는 입력 스키마.
 - `run_pi.py` — 케이스 × 반복마다 `benchcore.judge` 로 1회 판정 → `results/<run>/records.jsonl` 에 append.
+  `--resume` 은 그 파일을 읽어 이미 끝난 (case, repeat) 를 빼고 남은 것만 돌린다.
 - `verify_poc.py` — `records.jsonl` 의 `pred_poc` 를 파싱해 케이스를 컴파일·실행하고 발동 여부를
   `poc.jsonl`·`poc_summary.md` 로 남긴다. 모델 출력이 명령줄로 흘러가므로 네트워크 없는 컨테이너에서 돈다.
 - `aggregate.py` — `records.jsonl` → `summary.md`, `summary.csv`.
@@ -31,8 +32,14 @@ LLM 취약점 탐지 교란 벤치마크. `cases/` 의 소스 코드를 pi 코�
   사람이 검수하여 라벨을 확정한 뒤 넣는다. 플랫폼은 입력된 라벨을 정답으로 사용하며 자동 검증하지 않는다.
 - 의존성 추가 금지 (Python 표준 라이브러리만). pi 는 Node 22+ 전역 설치.
 - `results/<run>/records.jsonl` 은 실행 중 append-only 실험 기록이다. 기존 run 의 기록을 수정·삭제하지 않는다.
-  이미 존재하는 run-name 은 거절한다. 중단된 실험이나 새 조건은 새 `--run-name` 으로 실행한다.
+  이미 존재하는 run-name 은 거절한다. 새 조건은 새 `--run-name` 으로 실행한다.
   집계는 기존 기록에서 요약 파일을 다시 생성할 수 있으며, 과거 중복 기록은 (case, repeat) 별 마지막 기록을 쓴다.
+- **중단된 run 은 `--resume` 으로 잇는다.** 이미 기록된 (case, repeat) 는 건너뛴다.
+  **오류로 끝난 평가도 완료로 센다** — 다시 돌리면 중단되지 않은 run 이 못 받은 재시도를 그 셀에만 주게 된다.
+  측정을 결정하는 설정(`MEASUREMENT_FIELDS`)이 바뀌었으면 거절한다. `jobs`·`retries`·`timeout_sec` 은 비교하지 않는다.
+  append-only 의 예외는 하나뿐이다: `trim_torn_tail` 이 **개행 없이 끊긴 마지막 조각**을 지운다.
+  그대로 두고 append 하면 그 조각과 첫 재개 기록이 한 줄로 붙어 **재개한 평가까지 잃고**,
+  손상된 줄이 더는 마지막이 아니게 되어 이후 재개가 전부 막힌다. 지우는 바이트는 완전한 기록이 아니다.
 - 실패 기록에도 케이스·언어·소스·실험 조건을 유지한다. 오류는 `error_type` 으로 분류하고 판정값을 비운다.
   집계에서 실패는 n/unparsed/errors 에 포함하며, 모델의 NO/UNCERTAIN 과 구분한다.
 - 판정은 성공한 submit_verdict 호출 하나에서만 읽는다. 텍스트 JSON 을 판정으로 파싱하지 않는다.

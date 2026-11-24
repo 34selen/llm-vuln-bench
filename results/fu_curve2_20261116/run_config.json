@@ -1,0 +1,24 @@
+{
+  "config": {
+    "model": "zai/glm-5.3",
+    "thinking": "medium",
+    "repeats": 3,
+    "tools": [
+      "submit_verdict"
+    ],
+    "jobs": 2,
+    "timeout_sec": 2700,
+    "retries": 1,
+    "pi_extra_args": []
+  },
+  "model": "zai/glm-5.3",
+  "thinking": "medium",
+  "tools": [
+    "submit_verdict"
+  ],
+  "response_mode": "tool",
+  "repeats": 3,
+  "system_prompt": "prompts/system.md",
+  "mock": false,
+  "started": "2026-11-16 21:03:57"
+}

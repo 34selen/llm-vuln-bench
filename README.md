@@ -48,10 +48,22 @@ python3 run_pi.py --dry-run                     # 실제 pi 명령만 출력 (�
 python3 run_pi.py --filter __sat3 --limit 2     # 일부만
 python3 run_pi.py --model zai-api/glm-5.3 ...   # 엔드포인트 변경
 python3 run_pi.py --prompt prompts/system_any.md --run-name glm53_think_any   # 판정 프롬프트 교체
+python3 run_pi.py --run-name glm53_tool_001 --resume                          # 중단된 run 이어서
 ```
 
 run-name 은 한 번만 사용할 수 있다. 같은 이름의 파일이나 폴더가 이미 있으면 실행을 거절하며,
-기존 설정·기록·원문을 덮어쓰거나 이어 쓰지 않는다. 중단된 실험도 새 run-name 으로 실행한다.
+기존 설정·기록·원문을 덮어쓰거나 이어 쓰지 않는다.
+
+**중단된 run 은 `--resume` 으로 이어서 돌린다.** `records.jsonl` 에 이미 있는 (case, repeat) 는
+건너뛰고 남은 것만 평가한다. 이어 돌리지 않고 새 run-name 으로 처음부터 가면 **끝난 평가의 비용을 다시 낸다.**
+
+- **오류로 끝난 평가도 "완료"로 센다.** 다시 돌리면 중단되지 않은 run 이 받지 못한 재시도를 그 셀에만 주는 셈이라
+  조건이 달라진다. 이어 돌리기는 run 을 잇는 것이지 개선하는 것이 아니다. 그 평가를 다시 하려면 새 run-name 을 쓴다.
+- **측정을 결정하는 설정이 바뀌었으면 거절한다** (model, thinking, tools, repeats, 시스템 프롬프트, mock).
+  어느 칸이 어떻게 다른지 찍고 멈춘다. `jobs`·`retries`·`timeout_sec` 은 비교하지 않는다 —
+  호출을 어떻게 던지냐를 바꿀 뿐 무엇을 묻는지는 바꾸지 않는다.
+- `--limit` 을 같이 주면 **남은 것 중 N개**만 더 돌린다.
+- 이어 돌린 시각은 `run_config.json` 의 `resumed` 에 쌓인다. 기록에 공백이 보여야 한다.
 이름을 생략하면 모델 이름과 마이크로초까지 포함한 시각으로 자동 생성한다.
 `aggregate.py` 는 기존 기록에서 요약 파일을 다시 생성할 수 있다.
 
