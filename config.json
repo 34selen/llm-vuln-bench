@@ -3,7 +3,7 @@
   "thinking": "medium",
   "repeats": 3,
   "tools": ["submit_verdict"],
-  "jobs": 2,
+  "jobs": 1,
   "timeout_sec": 900,
   "retries": 2,
   "pi_extra_args": []
