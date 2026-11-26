@@ -7,13 +7,14 @@ from pathlib import Path
 
 import aggregate
 import logic_benchmark
+import logic_calibration
 
 
 class LogicBenchmarkTests(unittest.TestCase):
     def test_default_suite_checks_labels_and_records_distinct_work(self):
         cases = logic_benchmark.load_suite(logic_benchmark.DEFAULT_SUITE)
         rows = {case[0]: logic_benchmark.profile(*case) for case in cases}
-        self.assertEqual(len(rows), 7)
+        self.assertEqual(len(rows), 12)
         self.assertEqual(rows["choice-unsat"]["answer"], "UNSAT")
         self.assertGreater(rows["choice-unsat"]["search_nodes"], rows["unit-unsat"]["search_nodes"])
         self.assertLess(rows["choice-sat-with-unit"]["search_nodes"], rows["choice-sat"]["search_nodes"])
@@ -46,8 +47,31 @@ class LogicBenchmarkTests(unittest.TestCase):
                 [*command, "--predictions", str(predictions)], text=True,
             ))
         self.assertEqual(report["score"], {
-            "cases": 7, "correct": 1, "incorrect": 1, "uncertain": 1, "missing": 4,
+            "cases": 12, "correct": 1, "incorrect": 1, "uncertain": 1, "missing": 9,
         })
+
+
+class CalibrationTests(unittest.TestCase):
+    def test_calibration_checks_all_labels_and_controls(self):
+        report = logic_calibration.calibrate(
+            logic_benchmark.DEFAULT_SUITE, logic_calibration.DEFAULT_PLAN,
+        )
+        self.assertEqual(report["verified_cases"], 12)
+        self.assertEqual(len(report["comparisons"]), 6)
+        self.assertEqual(set(report["comparisons"][-1]["axes"]), set(logic_calibration.AXIS_NAMES))
+
+    def test_mislabeled_axis_fails_even_when_both_labels_are_sat(self):
+        profiles = {
+            case[0]: logic_benchmark.profile(*case)
+            for case in logic_benchmark.load_suite(logic_benchmark.DEFAULT_SUITE)
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.json"
+            path.write_text(json.dumps([
+                {"before": "choice-sat", "after": "choice-sat-with-unit", "axes": ["block_count"]},
+            ]))
+            with self.assertRaisesRegex(ValueError, "changed clause_count"):
+                logic_calibration.evaluate_comparisons(path, profiles)
 
 
 class ReviewOutcomeTests(unittest.TestCase):

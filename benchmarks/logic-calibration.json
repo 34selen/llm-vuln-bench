@@ -1,0 +1,8 @@
+[
+  {"before": "choice-sat", "after": "choice-sat-with-unit", "axes": ["clause_count"]},
+  {"before": "choice-unsat", "after": "choice-unsat-with-unit", "axes": ["clause_count"]},
+  {"before": "three-vars-sat", "after": "four-vars-sat", "axes": ["variable_count"]},
+  {"before": "independent-sat-one-block", "after": "independent-sat", "axes": ["block_count"]},
+  {"before": "independent-unsat-one-block", "after": "independent-unsat", "axes": ["block_count"]},
+  {"before": "unit-sat", "after": "independent-sat", "axes": ["variable_count", "clause_count", "block_count"]}
+]

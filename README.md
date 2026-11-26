@@ -196,6 +196,20 @@ python3 logic_benchmark.py --predictions answers.json
 채점 결과는 정답, 오답, 보류, 제출 누락을 분리한다.
 모든 단계는 표준 라이브러리만 사용하며 로컬 파일을 입력으로 받는다.
 
+### 난이도 보정 결과
+
+`logic_calibration.py`는 블록을 합친 전체 식의 진리표로 DPLL 정답을 독립 검증하고, `benchmarks/logic-calibration.json`에 선언한 대조쌍을 비교한다.
+각 쌍에서 SAT·UNSAT 정답을 동일하게 두고, 실제로 달라진 절·변수·블록 수가 비교표의 선언과 일치하는지 검증한다.
+진리표 검증은 문제 전체 변수 16개까지 지원한다.
+
+```bash
+python3 logic_calibration.py
+python3 logic_calibration.py --format json
+```
+
+탐색 노드와 단위 절 할당은 기준 솔버의 작업량이다.
+탐색 노드에는 블록별 시작 노드가 포함되므로, 블록 수 비교에서는 작업 분할이 집계에도 영향을 준다.
+
 ## 파이프라인 검증
 
 ```bash

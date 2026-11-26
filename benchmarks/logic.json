@@ -25,9 +25,34 @@
     "blocks": [[[1, 2], [-1, 2], [1, -2], [-1, -2]]]
   },
   {
+    "case_id": "choice-unsat-with-unit",
+    "expected": "UNSAT",
+    "blocks": [[[1, 2], [-1, 2], [1, -2], [-1, -2], [1]]]
+  },
+  {
+    "case_id": "three-vars-sat",
+    "expected": "SAT",
+    "blocks": [[[1, 2, 3], [-1, -2, 3], [-1, 2, -3]]]
+  },
+  {
+    "case_id": "four-vars-sat",
+    "expected": "SAT",
+    "blocks": [[[1, 2, 3], [-1, -2, 3], [-1, 2, -4]]]
+  },
+  {
+    "case_id": "independent-sat-one-block",
+    "expected": "SAT",
+    "blocks": [[[1, 2], [-1, 2], [3, 4], [3, -4]]]
+  },
+  {
     "case_id": "independent-sat",
     "expected": "SAT",
     "blocks": [[[1, 2], [-1, 2]], [[3, 4], [3, -4]]]
+  },
+  {
+    "case_id": "independent-unsat-one-block",
+    "expected": "UNSAT",
+    "blocks": [[[1, 2], [-1, 2], [3, 4], [-3, 4], [3, -4], [-3, -4]]]
   },
   {
     "case_id": "independent-unsat",
