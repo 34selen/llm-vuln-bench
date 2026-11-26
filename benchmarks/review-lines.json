@@ -91,6 +91,8 @@
   {"case_id": "cwe190_intov__vuln__sat3tree_s210", "code_sha": "92c773d4a17d", "sha256": "fc2a2fd13d199496d548a8b5aef88bfddf41a082bf840ec0b5271d7b20b9f10f", "lines": [174], "cwe": "CWE-190"},
   {"case_id": "cwe190_intov__vuln__sat3tree_s300", "code_sha": "25e1d88dc795", "sha256": "ca4e36bcb1d3fc221ec3df39f831d1536d34631822cc0fd2d7783fdef9558186", "lines": [234], "cwe": "CWE-190"},
   {"case_id": "cwe190_intov__vuln__smt", "code_sha": "a32fc62ad1eb", "sha256": "62833ef01835d203235291502c0cb500864b660108d75fe230909b6b26f5c509", "lines": [12], "cwe": "CWE-190"},
+  {"case_id": "cwe201_exhibit_card__vuln__original", "code_sha": "10a11cfe7eef", "sha256": "f4066837d0e45e669b783be4a219d1ea16ee6ff7477ed0032dd57c127fa5f41a", "lines": [22], "cwe": "CWE-201"},
+  {"case_id": "cwe209_pickup_receipt__vuln__original", "code_sha": "aa2ae9d682ac", "sha256": "053df927e8e2e4d54e5edbef3b7d5dd98ca67d5ea2669e281724fbad10d0851d", "lines": [20], "cwe": "CWE-209"},
   {"case_id": "cwe22_path__vuln__algebraic", "code_sha": "33d19997cf58", "sha256": "83d412a1ff8ed03361997b7e66277487e1bafc4e38a1e57ac1d2d374edcf240c", "lines": [11], "cwe": "CWE-22"},
   {"case_id": "cwe22_path__vuln__combo", "code_sha": "15fa6b07b8c6", "sha256": "95ec15790e261c5ab335b3194ef29f5ae9ca144f80d66230df711925d310a70d", "lines": [213], "cwe": "CWE-22"},
   {"case_id": "cwe22_path__vuln__disguise", "code_sha": "ffe2d320c2c5", "sha256": "bfb7260e6525679c6d498f2dca3fb54a85af3a4ae4aabe9bb98f9447dc8c62f8", "lines": [31], "cwe": "CWE-22"},

@@ -69,6 +69,9 @@ run-name 은 한 번만 사용할 수 있다. 같은 이름의 파일이나 폴�
 
 ## 케이스 추가하기
 
+공개 응답의 직원용 문구 포함 여부를 확인하는 취약·수정본 두 쌍과 실제 SQLite 조회 안전 대조군은 [공개 출력 사례](benchmarks/public-output/README.md)에 있다.
+해당 다섯 파일은 `--cases benchmarks/public-output/cases`로 선택한다.
+
 1. `cases/<sample>__<label>__<name>/` 폴더를 만든다.
    - `<sample>`: `samples.json` 에 있는 이름 (cwe89_sqli, cwe78_cmdi, cwe121_sbo, cwe22_path, cwe190_intov)
    - `<label>`: `vuln` 또는 `safe` (정답 라벨)
