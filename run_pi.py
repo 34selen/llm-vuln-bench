@@ -126,7 +126,11 @@ def evaluate(case: dict, rep: int, cfg: dict, args, raw_dir: Path) -> dict:
         "started": time.time(),
     }
     try:
-        code = (Path(args.cases) / case["id"] / case["source"]).read_text()
+        source_bytes = (Path(args.cases) / case["id"] / case["source"]).read_bytes()
+        if hashlib.sha1(source_bytes).hexdigest()[:12] != case["code_sha"]:
+            raise ValueError("source changed after case discovery")
+        rec["code_sha256"] = hashlib.sha256(source_bytes).hexdigest()
+        code = source_bytes.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
         env_extra = None
         if CHECK_ENV in os.environ and judge.CHECK_TOOL in jd["tools"]:
             # the verification-loop condition: hand the judge the case's gate

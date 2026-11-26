@@ -9,7 +9,10 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from benchcore.review_quality import grade_detail, load_line_labels, summarize_details
+
 ROOT = Path(__file__).resolve().parent
+DEFAULT_LINE_LABELS = ROOT / "benchmarks" / "review-lines.json"
 ORDER = ["original", "algebraic", "sat3", "smt", "combo",
          "sat3tree_s150", "sat3tree_s210", "sat3tree_s300",
          "sat3tree_s1000", "sat3tree_s1700", "sat3tree_pad1000",
@@ -71,6 +74,7 @@ def load_records(path: Path) -> list[dict]:
             for key, value in zip(("sample", "label", "transform"), parts):
                 r.setdefault(key, value)
         meta = samples.get(r.get("sample"), {})
+        r["_recorded_cwe"] = r.get("cwe")
         r.setdefault("cwe", meta.get("cwe", "unknown"))
         r.setdefault("language", meta.get("language", "c"))
         r.setdefault("expected_vulnerable", r.get("label") == "vuln")
@@ -89,6 +93,8 @@ def load_records(path: Path) -> list[dict]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("run", help="run name under results/ or path to records.jsonl")
+    ap.add_argument("--line-labels", type=Path, default=DEFAULT_LINE_LABELS,
+                    help="versioned reference lines (default: bundled reviewed cases)")
     args = ap.parse_args()
     p = Path(args.run)
     rec_path = p if p.suffix == ".jsonl" else ROOT / "results" / args.run / "records.jsonl"
@@ -100,6 +106,11 @@ def main() -> int:
     except (OSError, ValueError) as e:
         print(f"cannot load records: {e}", file=sys.stderr)
         return 1
+    try:
+        line_labels = load_line_labels(args.line_labels)
+    except (OSError, ValueError) as e:
+        print(f"cannot load line labels: {e}", file=sys.stderr)
+        return 1
     if not recs:
         print("no records", file=sys.stderr)
         return 1
@@ -107,6 +118,7 @@ def main() -> int:
     transforms = [t for t in ORDER if any(r["transform"] == t for r in recs)] + \
                  sorted({r["transform"] for r in recs} - set(ORDER))
     languages = sorted({r["language"] for r in recs})
+    grades = {(r["case_id"], r["repeat"]): grade_detail(r, line_labels) for r in recs}
 
     # ---- per-transform stats, split by label -------------------------------
     rows = []
@@ -120,7 +132,8 @@ def main() -> int:
         no = sum(r.get("pred_vulnerable") == "NO" for r in rs)
         unc = sum(r.get("pred_vulnerable") == "UNCERTAIN" for r in rs)
         none = n - yes - no - unc
-        cwe_ok = sum(r.get("pred_vulnerable") == "YES" and r.get("pred_cwe") == r["cwe"] for r in rs)
+        detail = summarize_details([grades[r["case_id"], r["repeat"]] for r in rs])
+        legacy_cwe_ok = sum(r.get("pred_vulnerable") == "YES" and r.get("pred_cwe") == r["cwe"] for r in rs)
         errs = sum(1 for r in rs if r.get("error"))
         toks_in = [r["usage"].get("input", 0) + r["usage"].get("cacheRead", 0) for r in rs if r.get("usage")]
         toks_out = [r["usage"].get("output", 0) for r in rs if r.get("usage")]
@@ -130,7 +143,7 @@ def main() -> int:
         thought = sum(1 for r in rs if (r.get("usage") or {}).get("reasoning", 0) > 0 or r.get("thinking_chars", 0) > 0)
         rows.append({
             "language": language, "label": label, "transform": t, "n": n, "yes": yes, "no": no, "uncertain": unc, "unparsed": none,
-            "yes_rate": yes / n, "cwe_match_rate": (cwe_ok / n) if label == "vuln" else None,
+            "yes_rate": yes / n, "cwe_match_rate": (legacy_cwe_ok / n) if label == "vuln" else None,
             "errors": errs,
             "avg_in_tokens": round(sum(toks_in) / len(toks_in)) if toks_in else None,
             "avg_out_tokens": round(sum(toks_out) / len(toks_out)) if toks_out else None,
@@ -139,6 +152,7 @@ def main() -> int:
             "avg_reasoning_tokens": round(sum(reasoning) / n),
             "total_cost_usd": round(sum(costs), 4),
             "total_sec": round(sum(el), 1),
+            **detail,
         })
 
     # ---- per CWE x transform detection (vuln only) ------------------------
@@ -167,6 +181,12 @@ def main() -> int:
         w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)
+    with (out_dir / "review_details.csv").open("w", newline="") as fh:
+        writer = csv.writer(fh)
+        keys = ("case_id", "repeat", "label", "code_sha", "code_sha256", "pred_vulnerable", "cwe", "pred_cwe", "pred_line")
+        writer.writerow((*keys, "cwe_grade", "line_grade", "scored_cwe"))
+        for r in recs:
+            writer.writerow((*[r.get(k) for k in keys], *grades[r["case_id"], r["repeat"]]))
 
     md = []
     cfg_path = out_dir / "run_config.json"
@@ -183,6 +203,21 @@ def main() -> int:
 
     md.extend(review_outcomes(recs))
     md.append("")
+    md.extend([
+        "## Diagnostic accuracy on known vulnerable cases\n",
+        "| language | condition | YES | CWE / all | CWE / eligible YES | Line / eligible YES | Both / eligible YES | YES without line reference |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
+    ])
+    for r in rows:
+        if r["label"] != "vuln":
+            continue
+        rates = [f"{r[key + '_matches']}/{r[key + '_eligible_yes']}" if r[key + "_eligible_yes"] else "—"
+                 for key in ("cwe", "line", "both")]
+        md.append(f"| {r['language']} | {r['transform']} | {r['yes']} | {r['cwe_matches']}/{r['n']} | "
+                  + " | ".join(rates) + f" | {r['line_ungraded_yes']} |")
+    md.append("\nEligible YES = YES on a vulnerable case with a reference for the named field. "
+              "An omitted prediction on an eligible case counts as an unsuccessful match. "
+              "A dash indicates a zero denominator. See review_details.csv for individual grades.\n")
     md.append("## Detection by transform\n")
     md.append("| language | label | transform | n | YES | NO | UNCERTAIN | unparsed | errors | YES rate | CWE match | avg in tok | avg out tok | thinking | avg reasoning tok | avg sec | cost USD |")
     md.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")

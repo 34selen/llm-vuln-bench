@@ -1,6 +1,7 @@
 """Regression checks using temporary cases and fake pi responses; no API calls."""
 import contextlib
 import csv
+import hashlib
 import io
 import json
 import shutil
@@ -14,6 +15,7 @@ from unittest.mock import patch
 import aggregate
 import run_pi
 from benchcore import judge
+from benchcore import review_quality
 
 
 def stream(text, **message_fields):
@@ -216,8 +218,8 @@ class PipelineTests(unittest.TestCase):
             result = run_pi.main()
         return result, output.getvalue(), errors.getvalue()
 
-    def aggregate_cli(self, name):
-        with patch.object(sys, "argv", ["aggregate.py", name]), contextlib.redirect_stdout(io.StringIO()):
+    def aggregate_cli(self, name, *args):
+        with patch.object(sys, "argv", ["aggregate.py", name, *args]), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(aggregate.main(), 0)
         with (self.root / "results" / name / "summary.csv").open() as fh:
             return list(csv.DictReader(fh))
@@ -327,6 +329,85 @@ class PipelineTests(unittest.TestCase):
         (directory / "records.jsonl").write_text(json.dumps(record) + "\n")
         row = self.aggregate_cli("legacy")[0]
         self.assertEqual((row["language"], row["label"], row["n"], row["errors"]), ("c", "safe", "1", "1"))
+
+    def test_mock_run_grades_the_source_seen_by_the_judge(self):
+        case = self.add_case()
+        content = b"first\r\nsecond\r\n"
+        (case / "code.c").write_bytes(content)
+        labels = self.root / "review.json"
+        labels.write_text(json.dumps([{
+            "case_id": case.name, "code_sha": hashlib.sha1(content).hexdigest()[:12],
+            "sha256": hashlib.sha256(content).hexdigest(), "lines": [2],
+        }]))
+        response = subprocess.CompletedProcess([], 0, tool_stream(verdict(line=2)), "")
+        with patch.object(judge.subprocess, "run", return_value=response) as called:
+            self.assertEqual(self.run_cli("--run-name", "annotated")[0], 0)
+        self.assertEqual(self.records("annotated")[0]["code_sha256"], hashlib.sha256(content).hexdigest())
+        self.assertIn("first\nsecond\n", called.call_args.args[0][-1])
+        self.assertNotIn("sha256", called.call_args.args[0][-1])
+        (case / "code.c").write_text("changed after evaluation\n")
+        row = self.aggregate_cli("annotated", "--line-labels", str(labels))[0]
+        self.assertEqual((row["both_matches"], row["both_eligible_yes"]), ("2", "2"))
+
+    def test_reference_tool_checks_physical_lines_and_rejects_ambiguous_versions(self):
+        src = self.root / "sample.txt"
+        src.write_bytes(b"one\rtwo\r\n")
+        cmd = [sys.executable, review_quality.__file__, "--case-id", "sample", "--source", str(src), "--lines"]
+        entries = json.loads(subprocess.check_output([*cmd, "2", "1", "2"]))
+        self.assertEqual(entries[0]["lines"], [1, 2])
+        self.assertEqual(entries[0]["sha256"], hashlib.sha256(src.read_bytes()).hexdigest())
+        self.assertNotEqual(subprocess.run([*cmd, "3"], capture_output=True).returncode, 0)
+        labels = self.root / "labels.json"
+        labels.write_text(json.dumps(entries * 2))
+        with self.assertRaisesRegex(ValueError, "ambiguous or duplicate"):
+            review_quality.load_line_labels(labels)
+
+    def test_legacy_cwe_requires_versioned_evidence(self):
+        ref = review_quality.Reference("b" * 64, frozenset({2}), "CWE-121")
+        labels = {("sample", "a" * 12): ref}
+        record = dict(case_id="sample", code_sha="a" * 12, label="vuln", pred_vulnerable="YES",
+                      cwe="CWE-22", _recorded_cwe=None, pred_cwe="CWE-121", pred_line=2)
+        self.assertEqual(review_quality.grade_detail(record, labels), ("match", "match", "CWE-121"))
+        self.assertEqual(review_quality.grade_detail({**record, "code_sha": "f" * 12}, labels),
+                         ("no_reference", "no_reference", None))
+        for invalid in (True, 2.0, "2"):
+            self.assertEqual(review_quality.grade_detail({**record, "pred_line": invalid}, labels).line_grade, "mismatch")
+
+    def test_diagnostic_denominators_and_legacy_hashes_through_cli(self):
+        directory = self.root / "results" / "details"
+        directory.mkdir(parents=True)
+        cid, short, digest = "c_sample__vuln__original", "a" * 12, "b" * 64
+        labels = self.root / "lines.json"
+        labels.write_text(json.dumps([{"case_id": cid, "code_sha": short, "sha256": digest, "lines": [3, 9]}]))
+        base = dict(case_id=cid, code_sha=short, cwe="CWE-121", pred_vulnerable="YES", pred_cwe="CWE-121", pred_line=9)
+        changes = [
+            {}, {"pred_line": 3, "code_sha256": digest}, {"pred_line": 2, "pred_cwe": "CWE-22"},
+            {"pred_line": None, "pred_cwe": None}, {"code_sha256": "c" * 64},
+            {"code_sha": None, "cwe": "unknown"}, {"pred_vulnerable": "NO"},
+            {"pred_vulnerable": "UNCERTAIN"}, {"error": "fixture", "pred_vulnerable": "YES"},
+            {"case_id": "c_sample__safe__original"},
+        ]
+        path = directory / "records.jsonl"
+        content = "".join(json.dumps({**base, **change, "repeat": n}) + "\n" for n, change in enumerate(changes))
+        path.write_text(content)
+        rows = self.aggregate_cli("details", "--line-labels", str(labels))
+        row = next(row for row in rows if row["label"] == "vuln")
+        self.assertEqual((row["n"], row["yes"], row["no"], row["uncertain"], row["errors"]), ("9","6","1","1","1"))
+        self.assertEqual((row["cwe_matches"], row["cwe_eligible_yes"], row["cwe_omitted_yes"]), ("3","5","1"))
+        self.assertEqual((row["line_matches"], row["line_eligible_yes"], row["line_ungraded_yes"],
+                          row["line_omitted_yes"]), ("2","4","2","1"))
+        self.assertEqual((row["both_matches"], row["both_eligible_yes"]), ("2","4"))
+        self.assertAlmostEqual(float(row["cwe_match_rate"]), 3/9)
+        self.assertEqual(path.read_text(), content)
+        with (directory / "review_details.csv").open() as handle:
+            grades = list(csv.DictReader(handle))
+        self.assertEqual([r["line_grade"] for r in grades], [
+            "match","match","mismatch","omitted","no_reference","no_reference",
+            "not_detected","not_detected","not_detected","not_applicable",
+        ])
+        safe = next(row for row in rows if row["label"] == "safe")
+        self.assertEqual(safe["line_match_rate_on_eligible_yes"], "")
+        self.assertIn("3/9 | 3/5 | 2/4 | 2/4 | 2", (directory / "summary.md").read_text())
 
 
 if __name__ == "__main__":
