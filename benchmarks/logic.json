@@ -1,0 +1,37 @@
+[
+  {
+    "case_id": "unit-sat",
+    "expected": "SAT",
+    "blocks": [[[1], [-1, 2], [-2, 3]]]
+  },
+  {
+    "case_id": "unit-unsat",
+    "expected": "UNSAT",
+    "blocks": [[[1], [-1, 2], [-2]]]
+  },
+  {
+    "case_id": "choice-sat",
+    "expected": "SAT",
+    "blocks": [[[1, 2], [-1, 2], [1, -2]]]
+  },
+  {
+    "case_id": "choice-sat-with-unit",
+    "expected": "SAT",
+    "blocks": [[[1, 2], [-1, 2], [1, -2], [1]]]
+  },
+  {
+    "case_id": "choice-unsat",
+    "expected": "UNSAT",
+    "blocks": [[[1, 2], [-1, 2], [1, -2], [-1, -2]]]
+  },
+  {
+    "case_id": "independent-sat",
+    "expected": "SAT",
+    "blocks": [[[1, 2], [-1, 2]], [[3, 4], [3, -4]]]
+  },
+  {
+    "case_id": "independent-unsat",
+    "expected": "UNSAT",
+    "blocks": [[[1, 2], [-1, 2]], [[3, 4], [-3, 4], [3, -4], [-3, -4]]]
+  }
+]

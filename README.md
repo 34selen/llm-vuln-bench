@@ -170,6 +170,32 @@ GLM 5.3, thinking medium, 도구 없음, 케이스당 3회. 숫자는 **15회 �
 - CWE match = YES 이면서 CWE 번호까지 맞춘 비율.
 - `results/<run>/raw/` 에 pi 의 JSONL 원문(usage, 비용 포함)이 남는다. 재시도 원문은 `.attempt2.jsonl` 등의 별도 파일로 보관한다.
 
+요약의 `Review outcomes by ground truth` 표는 취약 라벨의 안전 판정(FN), 안전 라벨의 취약 판정(FP), 보류, 실행 오류를 따로 표시한다.
+`Incorrect / decisive`의 분모는 YES나 NO가 나온 건수이고, `Incorrect / requests`의 분모는 전체 요청 수다.
+
+## 논리 문제 난이도 벤치마크
+
+`logic_benchmark.py`는 고정된 불리언 논리 문제의 정답을 기준 솔버로 확인한다.
+출력에는 절 수, 변수 수, 블록 수, 절 밀도, 솔버의 탐색 노드 수와 단위 절로 값을 정한 횟수가 들어간다.
+두 작업량 수치는 동일한 기준 솔버에서 문제끼리 비교할 때 사용한다.
+기준 솔버는 주어진 절 순서에서 각 블록을 독립적으로 풀고, 블록별 작업량을 합산한다.
+
+```bash
+python3 logic_benchmark.py
+python3 logic_benchmark.py --questions > questions.json
+python3 logic_benchmark.py --predictions answers.json
+```
+
+기본 문제는 `benchmarks/logic.json`에 있으며, `--suite`로 같은 형식의 논리 문제 파일을 읽을 수 있다.
+`choice-sat`과 `choice-sat-with-unit`은 변수와 블록은 같고 단위 절 하나가 다른 비교용 문제다.
+각 문제는 `case_id`, `expected`(SAT 또는 UNSAT), `blocks`를 가진다.
+절의 양수와 음수는 각각 해당 변수가 참과 거짓일 때 만족하는 항목이다.
+블록 사이는 변수를 공유하지 않으며, 기준 솔버의 작업량을 제한하기 위해 블록당 변수는 최대 16개다.
+`--questions`로 내보내는 문제에는 정답과 작업량이 포함되지 않는다.
+채점할 때는 `{"unit-sat":"SAT","choice-unsat":"UNCERTAIN"}`처럼 케이스 ID별 답을 전달한다.
+채점 결과는 정답, 오답, 보류, 제출 누락을 분리한다.
+모든 단계는 표준 라이브러리만 사용하며 로컬 파일을 입력으로 받는다.
+
 ## 파이프라인 검증
 
 ```bash

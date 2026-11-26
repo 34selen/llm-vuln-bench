@@ -36,6 +36,28 @@ def majority(votes: list[str | None]) -> str:
     return top if n * 2 > len(votes) else "SPLIT"
 
 
+def review_outcomes(records: list[dict]) -> list[str]:
+    """Summarize evaluation outcomes without counting abstentions as mistakes."""
+    counts = Counter((record["label"], record.get("pred_vulnerable")) for record in records)
+    lines = [
+        "## Review outcomes by ground truth\n",
+        "| Label | Requests | Decisive verdicts | Incorrect / decisive | Incorrect / requests | UNCERTAIN | Errors |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    for label, incorrect_verdict, metric in (("vuln", "NO", "FN"), ("safe", "YES", "FP")):
+        decided = counts[label, "YES"] + counts[label, "NO"]
+        uncertain = counts[label, "UNCERTAIN"]
+        errors = counts[label, None]
+        requests = decided + uncertain + errors
+        if not requests:
+            continue
+        incorrect = counts[label, incorrect_verdict]
+        resolved_rate = f"{incorrect}/{decided}" if decided else "-"
+        lines.append(f"| {label} ({metric}) | {requests} | {decided} | {resolved_rate} | "
+                     f"{incorrect}/{requests} | {uncertain} | {errors} |")
+    return lines
+
+
 def load_records(path: Path) -> list[dict]:
     """Include legacy exception records by deriving their missing metadata."""
     samples = json.loads((ROOT / "samples.json").read_text())
@@ -159,6 +181,8 @@ def main() -> int:
     md.append(f"- records: {len(recs)}  cases: {len(by_case)}  cost: ${total_cost:.4f}  tokens: {total_tokens}  "
               f"call time: {total_sec / 60:.1f} min (sum over calls; wall time is shorter with jobs > 1)\n")
 
+    md.extend(review_outcomes(recs))
+    md.append("")
     md.append("## Detection by transform\n")
     md.append("| language | label | transform | n | YES | NO | UNCERTAIN | unparsed | errors | YES rate | CWE match | avg in tok | avg out tok | thinking | avg reasoning tok | avg sec | cost USD |")
     md.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
