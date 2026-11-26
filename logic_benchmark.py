@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 
@@ -13,6 +14,18 @@ DEFAULT_SUITE = Path(__file__).resolve().parent / "benchmarks" / "logic.json"
 MAX_VARIABLES_PER_BLOCK = 16
 Clause = tuple[int, ...]
 Block = tuple[Clause, ...]
+
+
+def read_json(path: Path):
+    def unique_keys(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"{path.name}: duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_keys)
 
 
 def assign(block: Block, literal: int) -> Block:
@@ -47,7 +60,7 @@ def solve(block: Block) -> tuple[bool, int, int]:
 
 
 def load_suite(path: Path) -> list[tuple[str, str, tuple[Block, ...]]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = read_json(path)
     if not isinstance(data, list) or not data:
         raise ValueError("suite must be a nonempty JSON array")
     cases = []
@@ -106,36 +119,91 @@ def profile(case_id: str, expected: str, blocks: tuple[Block, ...]) -> dict:
     }
 
 
-def score(rows: list[dict], path: Path) -> dict:
-    predictions = json.loads(path.read_text(encoding="utf-8"))
+def public_case_ids(cases, form_seed: int) -> dict[str, str]:
+    # Bind answers to the exact ordered questions and form, independently of private labels.
+    payload = json.dumps([form_seed, [blocks for _, _, blocks in cases]], separators=(",", ":"))
+    form = hashlib.sha256(payload.encode("ascii")).digest()
+    ids = {}
+    for index, (case_id, _, _) in enumerate(cases):
+        digest = hashlib.sha256(form + index.to_bytes(8, "big")).hexdigest()
+        ids[case_id] = "q-" + digest[:24]
+    if len(set(ids.values())) != len(ids):
+        raise ValueError("public ID collision; use another form seed")
+    return ids
+
+
+def read_predictions(path: Path, public_ids: dict[str, str]) -> dict[str, str]:
+    predictions = read_json(path)
     if not isinstance(predictions, dict) or any(
         value not in ("SAT", "UNSAT", "UNCERTAIN") for value in predictions.values()
     ):
         raise ValueError("predictions must map case IDs to SAT, UNSAT, or UNCERTAIN")
-    unknown = predictions.keys() - {row["case_id"] for row in rows}
-    if unknown:
-        raise ValueError(f"unknown prediction IDs: {', '.join(sorted(unknown))}")
-    counts = Counter()
+    owners = {public_id: case_id for case_id, public_id in public_ids.items()}
+    resolved = {}
+    for key, value in predictions.items():
+        case_id = owners.get(key, key)
+        if key in public_ids and case_id != key:
+            raise ValueError(f"ambiguous internal and public prediction ID: {key}")
+        if case_id not in public_ids:
+            raise ValueError(f"unknown prediction ID {key!r}; check the suite and form seed")
+        if case_id in resolved:
+            raise ValueError(f"multiple predictions for {case_id}")
+        resolved[case_id] = value
+    return resolved
+
+
+def outcome_counts(outcomes: Counter) -> dict:
+    return {
+        "cases": outcomes.total(),
+        **{key: outcomes[key] for key in ("correct", "incorrect", "uncertain", "missing")},
+    }
+
+
+def fraction(count: int, total: int) -> dict:
+    return {"count": count, "total": total, "rate": count / total if total else None}
+
+
+def grade(rows: list[dict], predictions: dict[str, str], public_ids: dict[str, str]) -> dict:
+    outcomes = Counter()
+    by_answer = {answer: Counter() for answer in ("SAT", "UNSAT")}
+    by_size = defaultdict(Counter)
+    graded = []
     for row in rows:
-        prediction = predictions.get(row["case_id"])
-        row["prediction"] = prediction
+        case_id = row["case_id"]
+        prediction = predictions.get(case_id)
         if prediction is None:
             outcome = "missing"
         elif prediction == "UNCERTAIN":
             outcome = "uncertain"
         else:
             outcome = "correct" if prediction == row["answer"] else "incorrect"
-        row["outcome"] = outcome
-        counts[outcome] += 1
+        graded.append({**row, "public_id": public_ids[case_id], "prediction": prediction, "outcome": outcome})
+        outcomes[outcome] += 1
+        by_answer[row["answer"]][outcome] += 1
+        size = (row["variable_count"], row["clause_count"], row["block_count"])
+        by_size[size][outcome] += 1
+    decisive = outcomes["correct"] + outcomes["incorrect"]
     return {
-        "cases": len(rows),
-        **{key: counts[key] for key in ("correct", "incorrect", "uncertain", "missing")},
+        "cases": graded,
+        "score": outcome_counts(outcomes),
+        "metrics": {
+            "accuracy_all": fraction(outcomes["correct"], len(rows)),
+            "accuracy_decisive": fraction(outcomes["correct"], decisive),
+            "coverage_decisive": fraction(decisive, len(rows)),
+            "constant_baselines": {key: fraction(value.total(), len(rows)) for key, value in by_answer.items()},
+        },
+        "by_answer": {key: outcome_counts(value) for key, value in by_answer.items()},
+        "by_size": [
+            {"variable_count": v, "clause_count": c, "block_count": b, **outcome_counts(counts)}
+            for (v, c, b), counts in sorted(by_size.items())
+        ],
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
+    parser.add_argument("--form-seed", type=int, default=0, help="use the same seed for export and scoring (default 0)")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--questions", action="store_true", help="export exercises without answers")
     mode.add_argument("--predictions", type=Path, help="score a JSON object of saved answers")
@@ -144,11 +212,16 @@ def main() -> int:
         cases = load_suite(args.suite)
         rows = [profile(*case) for case in cases]
         if args.questions:
-            output = [{"case_id": case_id, "blocks": blocks} for case_id, _, blocks in cases]
+            ids = public_case_ids(cases, args.form_seed)
+            output = sorted(
+                ({"case_id": ids[case_id], "blocks": blocks} for case_id, _, blocks in cases),
+                key=lambda question: question["case_id"],
+            )
         else:
             output = {"reference_solver": "dpll-v1", "cases": rows}
             if args.predictions:
-                output["score"] = score(rows, args.predictions)
+                ids = public_case_ids(cases, args.form_seed)
+                output.update(grade(rows, read_predictions(args.predictions, ids), ids))
     except (OSError, ValueError) as exc:
         print(f"logic benchmark: {exc}", file=sys.stderr)
         return 1

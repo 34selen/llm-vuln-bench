@@ -182,8 +182,6 @@ GLM 5.3, thinking medium, 도구 없음, 케이스당 3회. 숫자는 **15회 �
 
 ```bash
 python3 logic_benchmark.py
-python3 logic_benchmark.py --questions > questions.json
-python3 logic_benchmark.py --predictions answers.json
 ```
 
 기본 문제는 `benchmarks/logic.json`에 있으며, `--suite`로 같은 형식의 논리 문제 파일을 읽을 수 있다.
@@ -191,16 +189,39 @@ python3 logic_benchmark.py --predictions answers.json
 각 문제는 `case_id`, `expected`(SAT 또는 UNSAT), `blocks`를 가진다.
 절의 양수와 음수는 각각 해당 변수가 참과 거짓일 때 만족하는 항목이다.
 블록 사이는 변수를 공유하지 않으며, 기준 솔버의 작업량을 제한하기 위해 블록당 변수는 최대 16개다.
-`--questions`로 내보내는 문제에는 정답과 작업량이 포함되지 않는다.
-채점할 때는 `{"unit-sat":"SAT","choice-unsat":"UNCERTAIN"}`처럼 케이스 ID별 답을 전달한다.
-채점 결과는 정답, 오답, 보류, 제출 누락을 분리한다.
 모든 단계는 표준 라이브러리만 사용하며 로컬 파일을 입력으로 받는다.
+
+### 논리 문제 출제와 채점
+
+평가용 `benchmarks/logic-evaluation.json`에는 서로 다른 논리식 12개가 있다.
+변수·절·블록 수의 조합 6개에 각각 SAT(모든 조건을 만족하는 값이 있음)와 UNSAT(그런 값이 없음) 문제가 하나씩 있다.
+예를 들어 변수 3개·절 4개·블록 1개인 두 문제는 세 숫자가 같고 정답이 서로 다르다.
+SAT로만 답해도 이 세트에서는 6/12를 맞힌다.
+짝마다 문제 수가 적으므로 각 조합의 결과는 해당 두 문제에 한해 해석한다.
+
+```bash
+python3 logic_calibration.py --suite benchmarks/logic-evaluation.json --verify-only
+python3 logic_benchmark.py --suite benchmarks/logic-evaluation.json --form-seed 27 --questions > questions.json
+python3 logic_benchmark.py --suite benchmarks/logic-evaluation.json --form-seed 27 --predictions answers.json
+```
+
+응시자에게는 `questions.json`만 전달한다. 응시자는 각 문제의 `case_id`를 키로, `SAT`, `UNSAT`, `UNCERTAIN` 중 하나를 값으로 적은 JSON 객체를 제출한다.
+출제본의 식별자와 순서는 논리식 목록과 `--form-seed`로 정해진다. 출제·채점에 같은 파일과 같은 값을 쓴다(기본값 0).
+기존에 내부 문제 이름으로 저장한 답안도 채점할 수 있다. 중복 답안이나 다른 출제본의 공개 ID를 쓰면 오류로 처리한다.
+문제와 정답 원본은 공개되어 있으므로, 문제를 처음 접한 응시자를 평가할 때는 원본과 이전 채점 결과에 접근할 수 없는 환경을 사용한다.
+
+채점 결과의 `score`에는 정답·오답·보류·누락 건수가 들어간다.
+`metrics.accuracy_all`은 전체 문제 중 정답 비율, `accuracy_decisive`는 SAT 또는 UNSAT로 답한 문제 중 정답 비율, `coverage_decisive`는 전체 중 SAT 또는 UNSAT로 답한 비율이다.
+각 비율에는 분자와 분모가 함께 들어가며 분모가 0이면 `rate`는 `null`이다.
+`constant_baselines`는 한 가지로만 답했을 때의 정답률, `by_answer`는 실제 정답별 건수, `by_size`는 변수·절·블록 조합별 건수다.
 
 ### 난이도 보정 결과
 
 `logic_calibration.py`는 블록을 합친 전체 식의 진리표로 DPLL 정답을 독립 검증하고, `benchmarks/logic-calibration.json`에 선언한 대조쌍을 비교한다.
 각 쌍에서 SAT·UNSAT 정답을 동일하게 두고, 실제로 달라진 절·변수·블록 수가 비교표의 선언과 일치하는지 검증한다.
-진리표 검증은 문제 전체 변수 16개까지 지원한다.
+전체 변수가 16개 이하면 전체 식을 하나의 진리표로 검증한다.
+더 크면 변수를 공유하지 않는 각 블록을 진리표로 검증한다. 모든 블록을 만족시킬 수 있어야 전체 정답이 SAT다.
+비교 계획 없이 정답만 확인할 때는 `--verify-only`를 쓴다.
 
 ```bash
 python3 logic_calibration.py

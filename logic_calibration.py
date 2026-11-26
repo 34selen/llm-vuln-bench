@@ -8,11 +8,11 @@ import sys
 from itertools import product
 from pathlib import Path
 
-from logic_benchmark import DEFAULT_SUITE, Block, load_suite, profile
+from logic_benchmark import DEFAULT_SUITE, MAX_VARIABLES_PER_BLOCK, Block, load_suite, profile, read_json
 
 
 DEFAULT_PLAN = DEFAULT_SUITE.with_name("logic-calibration.json")
-MAX_TRUTH_TABLE_VARIABLES = 16
+MAX_TRUTH_TABLE_VARIABLES = MAX_VARIABLES_PER_BLOCK
 AXIS_NAMES = {
     "variable_count": "변수 수",
     "clause_count": "절 수",
@@ -33,7 +33,7 @@ def truth_table_answer(blocks: tuple[Block, ...]) -> str:
 
 
 def evaluate_comparisons(path: Path, profiles: dict[str, dict]) -> list[dict]:
-    plan = json.loads(path.read_text(encoding="utf-8"))
+    plan = read_json(path)
     if not isinstance(plan, list) or not plan:
         raise ValueError("comparison plan must be a nonempty array")
     comparisons = []
@@ -65,28 +65,45 @@ def evaluate_comparisons(path: Path, profiles: dict[str, dict]) -> list[dict]:
     return comparisons
 
 
-def calibrate(suite_path: Path, plan_path: Path) -> dict:
+def calibrate(suite_path: Path, plan_path: Path | None) -> dict:
     profiles = {}
+    block_checks = 0
     for case_id, expected, blocks in load_suite(suite_path):
         row = profile(case_id, expected, blocks)
-        independent = truth_table_answer(blocks)
+        if row["variable_count"] <= MAX_TRUTH_TABLE_VARIABLES:
+            independent = truth_table_answer(blocks)
+        else:
+            # load_suite verified that the blocks share no variables.
+            independent = "SAT" if all(truth_table_answer((block,)) == "SAT" for block in blocks) else "UNSAT"
+            row["independent_check"] = "disjoint-block-truth-tables"
+            block_checks += 1
         if independent != row["answer"]:
             raise ValueError(f"{case_id}: truth table found {independent}, DPLL found {row['answer']}")
         profiles[case_id] = row
-    return {
+    report = {
         "reference_solver": "dpll-v1",
         "independent_check": "truth-table",
         "verified_cases": len(profiles),
         "cases": list(profiles.values()),
-        "comparisons": evaluate_comparisons(plan_path, profiles),
+        "comparisons": evaluate_comparisons(plan_path, profiles) if plan_path is not None else [],
     }
+    if block_checks:
+        report["block_truth_table_cases"] = block_checks
+        report["independent_check"] = (
+            "disjoint-block-truth-tables" if block_checks == len(profiles) else "whole-and-block-truth-tables"
+        )
+    return report
 
 
 def markdown(report: dict) -> str:
+    verification = f"- 정답 검증: {report['verified_cases']}/{len(report['cases'])} 문제에서 DPLL과 전체 진리표 일치."
+    if block_checks := report.get("block_truth_table_cases"):
+        whole_checks = report["verified_cases"] - block_checks
+        verification = f"- 정답 검증: 전체 진리표 {whole_checks}문제, 독립 블록별 진리표 {block_checks}문제에서 DPLL과 일치."
     lines = [
         "# 논리 문제 벤치마크 보정",
         "",
-        f"- 정답 검증: {report['verified_cases']}/{len(report['cases'])} 문제에서 DPLL과 전체 진리표 일치.",
+        verification,
         f"- 선언한 비교: {len(report['comparisons'])}쌍.",
         "",
         "## 문제별 작업량",
@@ -100,6 +117,8 @@ def markdown(report: dict) -> str:
             f"| {case['block_count']} | {case['clause_density']} | {case['search_nodes']} "
             f"| {case['unit_assignments']} |"
         )
+    if not report["comparisons"]:
+        return "\n".join(lines)
     lines += [
         "",
         "## 대조쌍",
@@ -121,11 +140,13 @@ def markdown(report: dict) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
-    parser.add_argument("--plan", type=Path, default=DEFAULT_PLAN)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--plan", type=Path, default=DEFAULT_PLAN)
+    mode.add_argument("--verify-only", action="store_true", help="check every label without a comparison plan")
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     args = parser.parse_args()
     try:
-        report = calibrate(args.suite, args.plan)
+        report = calibrate(args.suite, None if args.verify_only else args.plan)
     except (OSError, ValueError) as exc:
         print(f"logic calibration: {exc}", file=sys.stderr)
         return 1
